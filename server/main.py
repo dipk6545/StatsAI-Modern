@@ -162,7 +162,7 @@ async def chat(message: str = Form(...), mode: str = Form("single"), domain: str
                 prompt = (
                     f"You are a Mathematical Script API. Generate a Python script (wrapped in ```python...```) that calculates precisely the data for: '{message}'. "
                     "The script MUST use numpy/scipy and PRINT exactly one JSON manifest via print(json.dumps(manifest)). "
-                prompt = (
+                # prompt = (
                 )
                 resp = await asyncio.get_event_loop().run_in_executor(
                         None, 
