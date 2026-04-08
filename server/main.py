@@ -1,0 +1,1208 @@
+import asyncio
+import json
+import re
+import os
+import sys
+import subprocess
+import requests
+import logging
+from datetime import datetime
+from typing import Optional, List
+from pathlib import Path
+from dotenv import load_dotenv
+from fastapi import Form
+from nicegui import ui, app
+from groq import Groq
+from cerebras.cloud.sdk import Cerebras
+
+# ── LOGGING CONFIG ──────────────────────────────────────────────────────────
+VAULT_DIR = Path(__file__).parent.parent / ".statsai_vault"
+VAULT_DIR.mkdir(exist_ok=True)
+
+LOG_FILE = VAULT_DIR / "statsai_production.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("StatsAI")
+
+# ── ENVIRONMENT CONFIG ──────────────────────────────────────────────────────
+# Path-intelligent loader: automatically finds .env even if launched from root
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+logger.info("Initializing StatsAI Production Hub...")
+logger.info(f"Log file: {LOG_FILE}")
+
+# ── BACKEND CORE (Intelligence Routing) ──────────────────────────────────────
+GROQ_API_KEY     = os.getenv("GROQ_API_KEY", "")
+CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
+
+GROQ_MODEL     = "llama-3.3-70b-versatile"
+CEREBRAS_MODEL = "llama3.1-8b"
+
+def _execute_dynamic_code(python_code: str) -> str:
+    """Execute LLM-generated Python and capture STDOUT as the raw manifest."""
+    try:
+        # 🧠 INDUSTRIAL HARDENING: Global Numpy-to-JSON Transformer
+        safe_code = (
+            "import numpy as np\n"
+            "import json\n"
+            "import sys\n"
+            "import scipy.stats as stats\n"
+            "class NpEncoder(json.JSONEncoder):\n"
+            "    def default(self, obj):\n"
+                "        if isinstance(obj, np.integer): return int(obj)\n"
+                "        if isinstance(obj, np.floating): return float(obj)\n"
+                "        if isinstance(obj, np.ndarray): return obj.tolist()\n"
+                "        return super(NpEncoder, self).default(obj)\n"
+            "sys.stdout.reconfigure(encoding='utf-8')\n"
+            "original_dumps = json.dumps\n"
+            "json.dumps = lambda obj, **kwargs: original_dumps(obj, cls=NpEncoder, **kwargs)\n"
+            f"{python_code}"
+        )
+        tmp_file = VAULT_DIR / "_gen_data_production.py"
+        with open(tmp_file, "w", encoding='utf-8') as f:
+            f.write(safe_code)
+        
+        proc = subprocess.run(
+            [sys.executable, str(tmp_file)],
+            capture_output=True, text=True, timeout=10, encoding='utf-8'
+        )
+        out = proc.stdout.strip()
+        # 🛠️ UNIVERSAL REGEX: Capture Objects {} or Arrays []
+        m = re.search(r'([\[\{].*[\]\}])', out, re.DOTALL)
+        return m.group(1) if m else out
+    except Exception as e:
+        return json.dumps({"type": "error", "title": f"Exec Error: {str(e)}", "labels": [], "values": []})
+
+def _manifest_to_plotly(manifest_raw: str) -> str:
+    """Factory: Transforms various AI JSON formats into a premium, styled Plotly object."""
+    try:
+        # Pre-process: AI sometimes prints a dict string instead of JSON
+        clean_json = manifest_raw.replace("'", '"')
+        m = json.loads(clean_json)
+        
+        labels, values, title, ctype = [], [], "Analysis", "line"
+
+        # 🛠️ COORDINATE DETECTIVE: List-of-Dicts or List-of-Lists
+        if isinstance(m, list):
+            if len(m) > 0 and isinstance(m[0], dict):
+                first = m[0]
+                lx = next((k for k in ["x", "name", "label", "category"] if k in first), None)
+                ly = next((k for k in ["y", "sales", "value", "total", "count"] if k in first), None)
+                if lx and ly:
+                    labels = [item.get(lx) for item in m]
+                    values = [item.get(ly) for item in m]
+            elif len(m) > 0 and isinstance(m[0], list) and len(m[0]) >= 2:
+                labels = [item[0] for item in m]
+                values = [item[1] for item in m]
+        
+        # 🛠️ STANDARD FORMAT
+        elif isinstance(m, dict):
+            labels = m.get("labels") or m.get("categories") or m.get("x") or m.get("data_x") or m.get("points_x") or []
+            values = m.get("values") or m.get("y") or m.get("data") or m.get("data_y") or m.get("points_y") or [s.get("value") for s in m.get("slices", [])] or []
+            title = m.get("title", "Analysis")
+            ctype = str(m.get("type", "line")).lower()
+
+        # 🛠️ SCIENCE-GRADE CLEANER: Robust float conversion
+        def to_f(val):
+            try: return float(val)
+            except: return val
+
+        labels = [to_f(x) for x in labels]
+        values = [to_f(y) for y in values]
+
+        trace = {"marker": {"color": "#7c3aed"}}
+        if ctype in ["pie", "sunburst", "treemap", "funnel_area"]:
+            trace.update({"type": ctype, "labels": labels, "values": values})
+        elif ctype in ["box", "violin", "strip"]:
+            trace.update({"type": ctype, "y": values, "name": title})
+        elif ctype in ["histogram", "histogram2d"]:
+            trace.update({"type": ctype, "x": labels, "y": values})
+        elif ctype == "bar":
+            trace.update({"type": "bar", "x": labels, "y": values})
+        else: # Standard Line/Scatter with Professional Bell-Curve Fill
+            trace.update({
+                "type": "scatter", 
+                "mode": "lines+markers", 
+                "fill": "tozeroy", 
+                "x": labels, "y": values, 
+                "line": {"color": "#7c3aed", "width": 3},
+                "marker": {"size": 4}
+            })
+
+        return json.dumps({
+            "data": [trace],
+            "layout": {
+                "title": f"PRO-STATS: {title}", "template": "plotly_white",
+                "xaxis": {"title": "Input (X Axis)", "gridcolor": "#f1f5f9", "autorange": True},
+                "yaxis": {"title": "Density/Value (Y Axis)", "gridcolor": "#f1f5f9", "autorange": True},
+                "margin": {"t": 40, "r": 20, "b": 40, "l": 50},
+                "paper_bgcolor": "rgba(0,0,0,0)", "plot_bgcolor": "rgba(0,0,0,0)"
+            }
+        })
+    except:
+        return manifest_raw # Fallback
+
+@app.post("/api/chat")
+async def chat(message: str = Form(...), mode: str = Form("single"), domain: str = Form("statistics"), history: str = Form("[]")):
+    try:
+        g_client = Groq(api_key=GROQ_API_KEY)
+        c_client = Cerebras(api_key=CEREBRAS_API_KEY)
+        hist = json.loads(history)
+        
+        logger.info(f"Analytical Request: {message[:50]}...")
+
+        # Task 1: Cerebras for RAW DATA SCRIPT (Manifest via Execution)
+        async def get_manifest():
+            try:
+                prompt = (
+                    f"You are a Mathematical Script API. Generate a Python script (wrapped in ```python...```) that calculates precisely the data for: '{message}'. "
+                    "The script MUST use numpy/scipy and PRINT exactly one JSON manifest via print(json.dumps(manifest)). "
+                prompt = (
+                )
+                resp = await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        lambda: c_client.chat.completions.create(model=CEREBRAS_MODEL, messages=[{"role": "user", "content": prompt}], max_tokens=8192)
+                )
+                raw_ai = resp.choices[0].message.content.strip()
+                
+                # Extract and Execute the script
+                m_code = re.search(r'```python\s*(.*?)\s*```', raw_ai, re.DOTALL)
+                if m_code:
+                    data_json_raw = _execute_dynamic_code(m_code.group(1))
+                    return f"<plotly_chart>{_manifest_to_plotly(data_json_raw)}</plotly_chart>"
+                
+                # Fallback if no code block but raw JSON
+                return f"<plotly_chart>{_manifest_to_plotly(raw_ai)}</plotly_chart>"
+            except Exception as e:
+                return f"Data Error: {str(e)}"
+
+        # Task 2: Groq for ANALYTICAL INSIGHT (Summary + Explanation)
+        async def get_insight():
+            try:
+                prompt = (
+                    f"Analyze this statistical request: '{message}'. Providing a professional analysis. "
+                    "Include a 2-sentence summary and a deep <explanation> block with derivations if needed. "
+                    "Do NOT generate any chart tags or JSON data. Speak as a doctoral level statistician."
+                )
+                messages = [{"role": "system", "content": f"You are a Doctoral Analyst in {domain.upper()}. No charts."}]
+                # Keep meaningful history context (clean of chart tags)
+                for h in hist[-6:]:
+                    clean_txt = re.sub(r'<(?:plotly_chart|explanation|data_manifest)>.*?</(?:plotly_chart|explanation|data_manifest)>', '', h['text'], flags=re.DOTALL)
+                    messages.append({"role": "assistant" if h['role'] in ['model','assistant','bot'] else "user", "content": clean_txt})
+                messages.append({"role": "user", "content": message + "\n" + prompt})
+                
+                resp = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: g_client.chat.completions.create(model=GROQ_MODEL, messages=messages, max_tokens=2048)
+                )
+                return resp.choices[0].message.content.strip()
+            except:
+                return "Analysis Pending..."
+
+        # Execute Parallel Compute
+        try:
+            manifest_block, insight = await asyncio.gather(get_manifest(), get_insight())
+        except Exception as e:
+            logger.exception("Parallel Handshake Failed")
+            return {"reply": f"Architecture Error: {str(e)}"}
+        
+        # Unified Combine
+        final_reply = f"{insight}\n\n{manifest_block}"
+        return {"reply": final_reply}
+    except Exception as e:
+        logger.exception("Chat Endpoint Critical Failure")
+        return {"reply": f"System Error: Please check the logs. ({str(e)})"}
+
+# ── UI CONFIG & CONSTANTS ───────────────────────────────────────────────────
+APP_TITLE             = 'StatsAI'
+APP_SUBTITLE          = 'ANALYST'
+BOT_HEADER_NAME       = 'StatsAI Analyst'
+BOT_LABEL             = 'STATSAI ANALYST'
+BOT_STATUS            = 'Online'
+VERIFIED_BADGE        = 'Verified'
+INPUT_PLACEHOLDER     = 'Message StatsAI...'
+NEW_CHAT_LABEL        = '+ New chat'
+NAV_SECTION_LABEL     = 'NAVIGATION'
+RECENT_SECTION_LABEL  = 'RECENT'
+TOOLS_SECTION_LABEL   = 'ANALYSIS TOOLS'
+QUICK_ACTIONS_LABEL   = 'QUICK ACTIONS'
+PIPELINE_LABEL        = 'PIPELINE'
+SWITCH_MODEL_LEFT     = 'Single'
+SWITCH_MODEL_RIGHT    = 'Multi'
+CHAT_HEADING          = 'StatsAI Analyst'
+CHAT_SUBHEADING       = 'Statistical AI Assistant'
+USER_AVATAR_LETTER    = 'S'
+
+PIPELINE_STEPS = [
+    'Agent Initialized',
+    'Mode: Single-Model', # Dynamic labeling in render
+    'Model: Llama 3.3',
+    'API: Groq (LPU)',
+    'Data Simulation',
+    'Deep Analysis',
+    'Plotly Rendering',
+    'Response Out'
+]
+
+CHIPS = [
+    'Normal Plot', 'T-Dist Plot', 'F-Dist Plot', 'Chi-Square',
+    'Poisson', 'Binomial', 'Exponential', 'Log-Normal',
+    'Scatter Plot', 'Box Plot', 'Regression Plot', 'Z-Curve', 
+    'ANOVA Plot', 'Heatmap Grid', 'Histogram', 'Trend Chart',
+    'Waterfall Plot', 'Violin Plot', 'Pareto Chart', 'Pie Breakout'
+]
+
+NAV_ITEMS = ['Chat', 'Reports', 'Datasets', 'Gallery']
+
+TOOLS = [
+    ('Descriptive', 'Mean, median, variance'),
+    ('Inferential', 'T-tests, ANOVA, χ²'),
+    ('Regression',  'Linear, logistic, multi'),
+    ('Visualize',   'Charts, plots, heatmaps'),
+]
+
+WELCOME_MESSAGE = (
+    "Hello! I'm here to help with statistical research and analysis. "
+    "What topic would you like to explore, or what data would you like to analyze?"
+)
+
+API_ENDPOINT  = 'http://127.0.0.1:3001/api/chat'
+API_TIMEOUT   = 90
+
+# ── SESSION STORE (in-memory, lives for process lifetime) ─────────────────────
+CHAT_SESSIONS: dict = {}   # { sid: { title, date, messages: [{role, text}] } }
+SESSION_ORDER: list = []   # newest-first list of sids
+
+
+def _new_sid():
+    import uuid
+    return str(uuid.uuid4())[:8]
+
+
+def _today_label():
+    return datetime.now().strftime('%b %d')
+
+
+# ── SVG HELPERS ───────────────────────────────────────────────────────────────
+def chart_svg(color='#7C3AED'):
+    return (
+        f'<svg width="14" height="14" viewBox="0 0 16 16" fill="none">'
+        f'<path d="M2 12l4-4 3 3 5-7" stroke="{color}" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    )
+
+
+def check_svg():
+    return (
+        '<svg width="7" height="7" viewBox="0 0 7 7" fill="none">'
+        '<path d="M1.5 3.5l1.5 1.5 2.5-3" stroke="white" stroke-width="1.2" '
+        'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    )
+
+
+def send_svg():
+    return (
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none">'
+        '<path d="M22 2L11 13" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+        '<path d="M22 2L15 22 11 13 2 9l20-7z" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+        '</svg>'
+    )
+
+
+def radio_svg(checked=False):
+    color = '#7c3aed' if checked else '#d1d5db'
+    inner = f'<circle cx="8" cy="8" r="3.5" fill="#7c3aed"/>' if checked else ''
+    return (
+        f'<svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;">'
+        f'<circle cx="8" cy="8" r="7" stroke="{color}" stroke-width="1.5"/>'
+        f'{inner}</svg>'
+    )
+
+
+# ── CHART JSON PARSER ─────────────────────────────────────────────────────────
+_CHART_TAG_RE = re.compile(r'<plotly_chart>(.*?)</plotly_chart>', re.DOTALL | re.IGNORECASE)
+_JSON_DECODER = json.JSONDecoder()
+
+def _parse_chart_json(raw: str) -> dict | None:
+    """
+    Three-pass parser for LLM chart JSON:
+      Pass 1 — straight json.loads
+      Pass 2 — strip trailing commas (most common LLM artifact)
+      Pass 3 — scan for first valid JSON object containing 'data' key
+               (handles bare JSON without tags)
+    Returns a fully-merged spec dict or None.
+    """
+    def _try(text):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return None
+
+    # Pass 1
+    spec = _try(raw)
+    if not spec:
+        # Pass 2 — remove trailing commas before ] or }
+        cleaned = re.sub(r',\s*([}\]])', r'\1', raw)
+        spec = _try(cleaned)
+    if not spec:
+        # Pass 3 — scan for bare JSON object
+        for i, ch in enumerate(raw):
+            if ch == '{':
+                try:
+                    obj, _ = _JSON_DECODER.raw_decode(raw, i)
+                    if isinstance(obj, dict) and 'data' in obj:
+                        spec = obj
+                        break
+                except json.JSONDecodeError:
+                    continue
+
+    if not spec or not isinstance(spec.get('data'), list) or len(spec['data']) == 0:
+        return None
+
+    # Enforce brand floor — merge under LLM layout so LLM can still override
+    base_layout = {
+        'template':       'plotly_white',
+        'paper_bgcolor':  'rgba(0,0,0,0)',  # transparent — prevents white-box on dark bg
+        'plot_bgcolor':   'rgba(0,0,0,0)',
+        'font':           {'family': 'ui-sans-serif, system-ui, sans-serif', 'size': 12},
+        'margin':         {'t': 30, 'r': 20, 'b': 44, 'l': 44},
+        'colorway':       ['#7c3aed'],
+    }
+    llm_layout = spec.get('layout', {})
+    merged_layout = {**base_layout, **llm_layout}
+    # Deep-merge nested dicts (font, margin, xaxis, yaxis…)
+    for k, v in base_layout.items():
+        if isinstance(v, dict) and isinstance(llm_layout.get(k), dict):
+            merged_layout[k] = {**v, **llm_layout[k]}
+
+    return {
+        'data':   spec['data'],
+        'layout': merged_layout,
+        'config': {
+            'displayModeBar': False,
+            'responsive':     True,
+            **spec.get('config', {}),
+        },
+    }
+
+
+def _render_chart(part: str, target=None):
+    """Render a <plotly_chart> block. Always operates inside `target` if given."""
+    m = _CHART_TAG_RE.search(part)
+    raw = m.group(1).strip() if m else part.strip()
+    spec = _parse_chart_json(raw)
+
+    def _draw():
+        if spec is None:
+            preview = (raw[:200] + '…') if len(raw) > 200 else raw
+            with ui.element('div').style(
+                'margin-top:8px;padding:10px 14px;border-radius:10px;'
+                'border:1px solid #fca5a5;background:#fff1f2;'
+            ):
+                ui.label('Chart parse error').style(
+                    'font-size:11px;font-weight:700;color:#b91c1c;display:block;margin-bottom:4px;'
+                )
+                ui.label(preview).style(
+                    'font-size:10px;color:#dc2626;font-family:monospace;'
+                    'white-space:pre-wrap;word-break:break-all;'
+                )
+            return
+        with ui.element('div').style(
+            'width:100%;margin-top:8px;border-radius:12px;overflow:hidden;'
+            'border:1px solid #f3f4f6;'
+        ):
+            ui.plotly(spec).classes('w-full').style('height:320px;')
+
+    if target is not None:
+        with target:
+            _draw()
+    else:
+        _draw()
+
+
+# ── AI BLOCK RENDERER ─────────────────────────────────────────────────────────
+def render_ai_block(raw_text: str, container):
+    """Render an AI response into container. Safe to call from async context
+    as long as the caller wraps with `with client:` before calling this."""
+    def _render_content_loop(txt, target):
+        pattern = r'(<(?:plotly_chart|plotly_table|explanation)>.*?</(?:plotly_chart|plotly_table|explanation)>)'
+        parts = re.split(pattern, txt, flags=re.DOTALL)
+        with target:
+            for part in parts:
+                part = part.strip()
+                if not part: continue
+                if part.startswith('<plotly_chart>'):
+                    # Create a wrapper div inside target, pass it as the chart's target
+                    chart_wrap = ui.element('div').classes('w-full')
+                    _render_chart(part, chart_wrap)
+                elif part.startswith('<plotly_table>'):
+                    try:
+                        data = json.loads(re.search(r'<plotly_table>(.*?)</plotly_table>', part, re.DOTALL).group(1).strip())
+                        columns = [{'name': c, 'label': c, 'field': c, 'align': 'left'} for c in data.get('columns', [])]
+                        ui.table(columns=columns, rows=data.get('rows', []), row_key='name').classes('w-full border rounded-xl mt-2 overflow-hidden shadow-sm')
+                    except Exception as e:
+                        ui.label(f'Table Error: {e}').classes('text-red-500 italic text-xs')
+                elif part.startswith('<explanation>'):
+                    exp_content = re.search(r'<explanation>(.*?)</explanation>', part, re.DOTALL).group(1).strip()
+                    with ui.expansion('🔍 Deep Analysis', icon='query_stats').classes('w-full bg-blue-50 border border-blue-200 rounded-xl text-xs mt-2'):
+                        inner = ui.element('div').classes('p-3')
+                        _render_content_loop(exp_content, inner)
+                else:
+                    ui.markdown(part).classes('bg-gray-100 border border-gray-200 rounded-2xl rounded-tl-sm p-4 text-[13px] text-gray-800 leading-relaxed block')
+
+    with container:
+        with ui.element('div').classes('flex gap-2.5 items-start w-full'):
+            ui.html(f'<div style="width:28px;height:28px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{chart_svg()}</div>')
+            with ui.element('div').classes('flex flex-col gap-1 flex-1 min-w-0'):
+                with ui.element('div').classes('flex items-center gap-1.5 mb-0.5'):
+                    ui.html(f'<span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:50%;background:#7c3aed;flex-shrink:0;">{check_svg()}</span>')
+                    ui.label(BOT_LABEL).classes('text-[10px] text-gray-400 font-bold uppercase tracking-wider')
+                _render_content_loop(raw_text, ui.element('div').classes('w-full flex flex-col gap-2'))
+
+
+# ── MAIN PAGE ─────────────────────────────────────────────────────────────────
+@ui.page('/')
+async def main_page():
+    ui.add_head_html(
+        '<link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/'
+        'tailwind.min.css" rel="stylesheet"/>'
+    )
+    ui.add_head_html(f'''<style>
+      *, *::before, *::after {{ box-sizing: border-box; }}
+
+      html, body {{
+        margin: 0; padding: 0;
+        width: 100vw; height: 100vh;
+        background: #ffffff;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+        overflow: hidden;
+      }}
+
+      /* Kill NiceGUI/Quasar wrapper padding */
+      .q-page-container, .q-page, .nicegui-content {{
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: 100% !important;
+      }}
+
+      /* Typing dots */
+      .bounce1 {{ animation: bdot 1.2s ease-in-out 0.0s infinite; }}
+      .bounce2 {{ animation: bdot 1.2s ease-in-out 0.2s infinite; }}
+      .bounce3 {{ animation: bdot 1.2s ease-in-out 0.4s infinite; }}
+      @keyframes bdot {{
+        0%,60%,100% {{ transform:translateY(0);opacity:.35; }}
+        30% {{ transform:translateY(-5px);opacity:1; }}
+      }}
+
+      /* Prevent selection and blue highlights */
+      * {{ -webkit-tap-highlight-color: transparent !important; }}
+      .no-select, .button, .q-btn, .nav-item, .send-btn, .action-btn {{ 
+        user-select: none !important; 
+        outline: none !important;
+        -webkit-user-select: none !important;
+      }}
+      .q-focus-helper, .q-ripple, .q-btn__overlay {{ 
+        display: none !important; 
+        visibility: hidden !important;
+        opacity: 0 !important;
+      }}
+      .q-btn:before {{ box-shadow: none !important; }}
+      .q-btn:active {{ background: transparent !important; }}
+
+      /* Pipeline pulse */
+      @keyframes pipe-pulse {{
+        0%,100% {{ transform:scale(1); opacity:1; box-shadow:0 0 0px rgba(124,58,237,0); }}
+        50% {{ transform:scale(1.3); opacity:0.7; box-shadow:0 0 12px rgba(124,58,237,0.5); }}
+      }}
+      .pipe-active-pulse {{ animation: pipe-pulse 1.2s ease-in-out infinite; }}
+
+      /* Quasar input resets */
+      .q-field__control, .q-field__native {{ background:transparent !important; }}
+      .q-field--outlined .q-field__control:before {{ border:none !important; }}
+      .q-field--outlined .q-field__control:after {{ display:none !important; }}
+      .q-field__marginal {{ color:#9ca3af; }}
+
+      /* Scrollbar */
+      ::-webkit-scrollbar {{ width:4px; }}
+      ::-webkit-scrollbar-track {{ background:transparent; }}
+      ::-webkit-scrollbar-thumb {{ background:#d1d5db;border-radius:99px; }}
+      ::-webkit-scrollbar-thumb:hover {{ background:#9ca3af; }}
+
+      /* App shell — fills full viewport */
+      .app-shell {{
+        display:flex;
+        width:100vw;
+        height:100vh;
+        overflow:hidden;
+        background:#ffffff;
+        position:fixed;
+        top:0;left:0;
+      }}
+
+      /* Sidebars */
+      .sidebar-left {{
+        width: clamp(175px, 16vw, 225px);
+        flex-shrink: 0;
+        background: #f9fafb;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+        border-right:1px solid #e5e7eb;
+      }}
+      
+      .sidebar-right {{
+        width: 450px;
+        flex-shrink: 0;
+        background: #ffffff;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+        border-left:1px solid #e5e7eb;
+      }}
+
+      /* Center */
+      .chat-center {{
+        flex:1;
+        min-width:0;
+        display:flex;
+        flex-direction:column;
+        background:#ffffff;
+        height:100%;
+        overflow:hidden;
+      }}
+
+      /* Nav item */
+      .nav-item {{
+        display:flex;align-items:center;gap:8px;
+        padding:7px 10px;border-radius:9px;
+        font-size:12.5px;cursor:pointer;
+        transition:background 0.15s;
+        border:1px solid transparent;
+        width:100%;
+      }}
+      .nav-item.active {{ background:#ffffff;border-color:#e5e7eb;font-weight:600;color:#111827; }}
+      .nav-item:not(.active) {{ color:#6b7280; }}
+      .nav-item:not(.active):hover {{ background:#f3f4f6; }}
+
+      /* Recent item */
+      .recent-item {{
+        display:block;padding:8px 10px;
+        border-radius:8px;cursor:pointer;
+        transition:background 0.15s;
+        width:100%;border:none;background:transparent;text-align:left;
+      }}
+      .recent-item:hover {{ background:#f3f4f6; }}
+      .recent-item.cur {{ background:#ede9fe; }}
+
+      /* Tool card */
+      .tool-card {{
+        padding:8px 10px;border-radius:9px;
+        border:1px solid #e5e7eb;background:#ffffff;
+        cursor:pointer;transition:border-color 0.15s,background 0.15s;
+        margin-bottom:5px;width:100%;
+      }}
+      .tool-card:hover {{ border-color:#a78bfa;background:#faf5ff; }}
+      .tool-card.sel {{ border-color:#7c3aed;background:#f5f3ff; }}
+
+      /* BIGGER COLOURED TOGGLE */
+      .tog-track {{
+        width:42px;height:22px;border-radius:999px;
+        background:#7c3aed;cursor:pointer;
+        transition:background 0.2s;position:relative;flex-shrink:0;
+      }}
+      .tog-track.off {{ background:#d1d5db; }}
+      .tog-thumb {{
+        position:absolute;top:3px;left:3px;
+        width:16px;height:16px;border-radius:50%;
+        background:white;transition:transform 0.2s;
+        box-shadow:0 1px 3px rgba(0,0,0,0.2);
+      }}
+      .tog-track.off .tog-thumb {{ transform:translateX(0); }}
+      .tog-track:not(.off) .tog-thumb {{ transform:translateX(20px); }}
+
+      /* Send button */
+      .send-btn {{
+        width:36px;height:36px;border-radius:10px;
+        background:#7c3aed;border:none;
+        display:flex;align-items:center;justify-content:center;
+        cursor:pointer;flex-shrink:0;
+        transition:background 0.15s,transform 0.1s;
+      }}
+      .send-btn:hover {{ background:#6d28d9; }}
+      .send-btn:active {{ transform:scale(0.91); }}
+
+      /* Section label */
+      .slabel {{
+        font-size:10px;font-weight:700;color:#9ca3af;
+        letter-spacing:0.08em;text-transform:uppercase;
+        display:block;
+      }}
+
+      /* Quick Action Capsules (Tight Density) */
+      .action-bubble {{
+        display:inline-block;
+        background:#ffffff;
+        border:1px solid #e5e7eb;
+        border-radius:16px;
+        padding:3px 9px;
+        margin-right:2px;
+        margin-bottom:4px;
+        font-size:10px;
+        color:#4b5563;
+        font-weight:600;
+        cursor:pointer;
+        transition:all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow:0 1px 2px rgba(0,0,0,0.03);
+      }}
+      .action-bubble:hover {{ 
+        border-color:#7c3aed;
+        background:#f5f3ff;
+        color:#7c3aed;
+        transform: translateY(-1px);
+        box-shadow:0 3px 5px -1px rgba(124, 58, 237, 0.08);
+      }}
+      .action-bubble:active {{ transform:scale(0.96); }}
+
+      /* Send button (overriding NiceGUI defaults) */
+      .send-btn {{
+        width:42px !important; height:42px !important; border-radius:12px !important;
+        background:#7c3aed !important; border:none !important;
+        display:flex !important; align-items:center !important; justify-content:center !important;
+        cursor:pointer !important; flex-shrink:0 !important;
+        min-height:unset !important; padding:0 !important;
+        transition:all 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      }}
+      .send-btn:hover {{ background:#6d28d9 !important; transform: translateY(-1px); }}
+      .send-btn:active {{ transform:scale(0.91) !important; }}
+      .send-btn .q-focus-helper {{ display:none !important; }}
+
+      /* Pipeline */
+      .pipe-row {{
+        display:flex;align-items:center;gap:8px;
+        font-size:11px;font-weight:400;color:#9ca3af;
+        transition:color 0.3s;
+      }}
+      .pipe-dot {{
+        width:8px;height:8px;border-radius:50%;
+        background:#d1d5db;flex-shrink:0;transition:background 0.3s;
+      }}
+      .pipe-line {{
+        width:2px;height:12px;margin-left:3px;
+        background:#e5e7eb;transition:background 0.3s;
+      }}
+
+      @media (max-width:820px) {{ .sidebar-right {{ display:none; }} }}
+      @media (max-width:560px) {{ .sidebar-left  {{ display:none; }} }}
+    </style>''')
+
+    # ── PER-REQUEST STATE ──────────────────────────────────────────────────────
+    class State:
+        active_nav      = 'Chat'
+        subject         = 'Descriptive'
+        is_processing   = False
+        model_multi     = False   # False=Single True=Multi
+        chart_seaborn   = False   # False=Plotly True=Seaborn
+        current_sid     = None
+        pipeline_step   = -1      # -1=idle
+        pipeline_visible = False
+
+    state = State()
+
+    # forward-declare refs filled during build
+    refs = {}   # 'messages_col', 'scroll_area', 'inp', 'render_pipeline', 'render_recents'
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # APP SHELL
+    # ══════════════════════════════════════════════════════════════════════════
+    with ui.element('div').classes('app-shell'):
+
+        # ── LEFT SIDEBAR ──────────────────────────────────────────────────────
+        with ui.element('div').classes('sidebar-left'):
+
+            # Logo
+            with ui.element('div').style(
+                'display:flex;align-items:center;gap:10px;'
+                'padding:15px 12px 11px;border-bottom:1px solid #e5e7eb;flex-shrink:0;'
+            ):
+                ui.html(
+                    f'<div style="width:30px;height:30px;background:#7c3aed;border-radius:8px;'
+                    f'display:flex;align-items:center;justify-content:center;flex-shrink:0;">'
+                    f'{chart_svg("white")}</div>'
+                )
+                with ui.element('div'):
+                    ui.label(APP_TITLE).style(
+                        'font-weight:700;font-size:13px;color:#111827;'
+                        'line-height:1.2;display:block;'
+                    )
+                    ui.label(APP_SUBTITLE).style(
+                        'font-size:9px;color:#9ca3af;letter-spacing:0.14em;'
+                        'font-weight:600;display:block;'
+                    )
+
+            # Navigation
+            nav_wrap = ui.element('div').style('padding:11px 8px 3px;flex-shrink:0;')
+            @ui.refreshable
+            def render_nav():
+                nav_wrap.clear()
+                with nav_wrap:
+                    ui.label(NAV_SECTION_LABEL).classes('slabel').style('padding:0 3px 7px;')
+                    for item in NAV_ITEMS:
+                        is_active = item == state.active_nav
+                        cls = 'nav-item active' if is_active else 'nav-item'
+                        
+                        def _nav_click(it=item):
+                            state.active_nav = it
+                            render_nav.refresh()
+                            # (Optional: Add logic to switch views here)
+
+                        with ui.element('div').classes(cls).on('click', _nav_click):
+                            ui.element('span').style(
+                                f'width:6px;height:6px;border-radius:50%;flex-shrink:0;'
+                                f'background:{"#7c3aed" if is_active else "#d1d5db"};'
+                            )
+                            ui.label(item).style(
+                                f'font-size:12.5px;{"font-weight:600;" if is_active else ""}'
+                            )
+            render_nav()
+            
+            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;flex-shrink:0;')
+
+            # Model Toggle (Full-Round Capsule Design)
+            with ui.element('div').style('padding:0px 12px;'):
+                def make_segmented_control(opt1, opt2, get_fn, set_fn):
+                    with ui.element('div').classes('w-full relative flex p-1 bg-gray-200/50 rounded-full h-auto no-select overflow-hidden').style('user-select:none;'):
+                        on = get_fn()
+                        pill = ui.element('div').style(
+                            f'position:absolute;top:2px;bottom:2px;left:2px;width:calc(50% - 2px);'
+                            f'background:white;border-radius:999px;box-shadow:0 1px 3px rgba(0,0,0,0.1);'
+                            f'transition:transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);'
+                            f'transform: translateX({"calc(100% + 1px)" if on else "0"});pointer-events:none;'
+                        )
+                        def _update(target_val):
+                            if get_fn() != target_val:
+                                set_fn(target_val)
+                                val = get_fn()
+                                pill.style(f'transform: translateX({"calc(100% + 1px)" if val else "0"});')
+                                b1_lab.classes(remove='text-purple-600 text-gray-500 font-bold font-medium text-[12px] text-[14px]')
+                                b1_lab.classes(f'{"text-gray-500 font-medium text-[12px]" if val else "text-purple-600 font-bold text-[14px]"}')
+                                b2_lab.classes(remove='text-purple-600 text-gray-500 font-bold font-medium text-[12px] text-[14px]')
+                                b2_lab.classes(f'{"text-purple-600 font-bold text-[14px]" if val else "text-gray-500 font-medium text-[12px]"}')
+                        
+                        # High-precision centered buttons
+                        with ui.button(on_click=lambda: _update(False)).classes('relative z-10 flex-1 h-full p-0 flex items-center justify-center').props('flat no-caps no-ripple'):
+                            b1_lab = ui.label(opt1).classes(
+                                f'w-full transition-all duration-300 no-select text-center leading-none '
+                                f'{"text-gray-500 font-medium text-[12px]" if on else "text-purple-600 font-bold text-[14px]"}'
+                            ).style('display:flex; align-items:center; justify-content:center;')
+                            
+                        with ui.button(on_click=lambda: _update(True)).classes('relative z-10 flex-1 h-full p-0 flex items-center justify-center').props('flat no-caps no-ripple'):
+                            b2_lab = ui.label(opt2).classes(
+                                f'w-full transition-all duration-300 no-select text-center leading-none '
+                                f'{"text-purple-600 font-bold text-[14px]" if on else "text-gray-500 font-medium text-[12px]"}'
+                            ).style('display:flex; align-items:center; justify-content:center;')
+                
+                def _get_model():  return state.model_multi
+                def _set_model(v): state.model_multi = v
+                make_segmented_control(SWITCH_MODEL_LEFT, SWITCH_MODEL_RIGHT, _get_model, _set_model)
+
+            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;flex-shrink:0;')
+
+            # Recent heading
+            ui.label(RECENT_SECTION_LABEL).classes('slabel').style(
+                'padding:0 12px 6px;flex-shrink:0;'
+            )
+
+            # Recent list
+            recents_wrap = ui.element('div').style(
+                'flex:1;min-height:0;overflow-y:auto;padding:0 6px;'
+            )
+
+            @ui.refreshable
+            def render_recents():
+                recents_wrap.clear()
+                with recents_wrap:
+                    if not SESSION_ORDER:
+                        ui.label('No recent chats').style(
+                            'font-size:11px;color:#d1d5db;padding:8px 10px;display:block;'
+                        )
+                    for sid in SESSION_ORDER:
+                        sess = CHAT_SESSIONS.get(sid)
+                        if not sess:
+                            continue
+                        is_cur = sid == state.current_sid
+                        cls = 'recent-item cur' if is_cur else 'recent-item'
+
+                        def _load(s=sid):
+                            _load_session(s)
+
+                        with ui.element('div').classes(cls).on('click', _load).style('width:100%;'):
+                            ui.label(sess['title']).style(
+                                'font-size:12px;font-weight:500;color:#374151;display:block;'
+                                'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+                            )
+                            ui.label(sess['date']).style(
+                                'font-size:10px;color:#9ca3af;display:block;margin-top:1px;'
+                            )
+
+            render_recents()
+            refs['render_recents'] = render_recents
+
+            # New chat
+            with ui.element('div').style(
+                'padding:8px 8px 11px;border-top:1px solid #e5e7eb;flex-shrink:0;'
+            ):
+                def _new_chat():
+                    _save_session()
+                    state.current_sid = None
+                    state.is_processing = False
+                    mc = refs['messages_col']
+                    mc.clear()
+                    render_ai_block(WELCOME_MESSAGE, mc)
+                    render_recents.refresh()
+
+                ui.button(NEW_CHAT_LABEL, on_click=_new_chat).style(
+                    'width:100%;background:#f9fafb;border:1px solid #e5e7eb;'
+                    'border-radius:9px;color:#374151;font-size:12px;font-weight:600;'
+                    'padding:8px 0;cursor:pointer;'
+                ).props('flat no-caps')
+
+        # ── CENTER CHAT ───────────────────────────────────────────────────────
+        with ui.element('div').classes('chat-center'):
+
+            # Header bar
+            with ui.element('div').style(
+                'display:flex;align-items:center;gap:12px;'
+                'padding:12px 18px;border-bottom:1px solid #e5e7eb;'
+                'flex-shrink:0;background:#ffffff;'
+            ):
+                ui.html(
+                    f'<div style="width:30px;height:30px;background:#ede9fe;'
+                    f'border-radius:8px;display:flex;align-items:center;'
+                    f'justify-content:center;flex-shrink:0;">{chart_svg()}</div>'
+                )
+                with ui.element('div').style('flex:1;min-width:0;'):
+                    ui.label(CHAT_HEADING).style(
+                        'font-size:14px;font-weight:700;color:#111827;'
+                        'display:block;line-height:1.2;'
+                    )
+                    with ui.element('div').style(
+                        'display:flex;align-items:center;gap:5px;margin-top:2px;'
+                    ):
+                        ui.element('span').style(
+                            'width:6px;height:6px;border-radius:50%;'
+                            'background:#22c55e;flex-shrink:0;'
+                        )
+                        ui.label(BOT_STATUS).style('font-size:11px;color:#6b7280;')
+                ui.label(VERIFIED_BADGE).style(
+                    'font-size:10px;font-weight:700;color:#7c3aed;background:#ede9fe;'
+                    'padding:2px 8px;border-radius:999px;flex-shrink:0;'
+                )
+
+            # Messages scroll
+            scroll_area = ui.scroll_area().style('flex:1;min-height:0;background:#ffffff;')
+            refs['scroll_area'] = scroll_area
+            with scroll_area:
+                messages_col = ui.element('div').style(
+                    'display:flex;flex-direction:column;gap:18px;padding:18px 18px;width:100%;'
+                )
+                refs['messages_col'] = messages_col
+                render_ai_block(WELCOME_MESSAGE, messages_col)
+
+            # Input area
+            with ui.element('div').style(
+                'padding:10px 14px 13px;border-top:1px solid #f3f4f6;'
+                'flex-shrink:0;background:#ffffff;'
+            ):
+                with ui.element('div').style(
+                    'display:flex;align-items:center;gap:10px;'
+                    'background:#f9fafb;border:1px solid #e5e7eb;'
+                    'border-radius:999px;padding:4px 5px 4px 16px;'
+                    'transition:box-shadow 0.15s,border-color 0.15s;'
+                ):
+                    inp = ui.input(placeholder=INPUT_PLACEHOLDER).props('borderless dense').style(
+                        'flex:1;font-size:13px;color:#111827;background:transparent;min-width:0;'
+                    )
+                    refs['inp'] = inp
+
+                    # Capture client at definition time (inside the page context)
+                    _client = ui.context.client
+
+                    async def send_message(forced_text=None):
+                        val = (forced_text or inp.value).strip()
+                        if not val or state.is_processing:
+                            return
+                        inp.value = ''
+                        state.is_processing = True
+                        state.pipeline_visible = True
+                        state.pipeline_step = -1
+                        refs['render_pipeline'].refresh()
+
+                        if state.current_sid is None:
+                            sid = _new_sid()
+                            state.current_sid = sid
+                            title = val[:40] + ('…' if len(val) > 40 else '')
+                            CHAT_SESSIONS[sid] = {
+                                'title': title,
+                                'date': _today_label(),
+                                'messages': [],
+                            }
+                            SESSION_ORDER.insert(0, sid)
+                            render_recents.refresh()
+
+                        mc   = refs['messages_col']
+                        sa   = refs['scroll_area']
+
+                        with _client:
+                            _render_user_bubble(val, mc)
+                        sa.scroll_to(percent=1.0)
+
+                        with _client:
+                            typing_el = _render_typing(mc)
+                        sa.scroll_to(percent=1.0)
+
+                        async def _pipe_anim():
+                            for i in range(len(PIPELINE_STEPS)):
+                                state.pipeline_step = i
+                                refs['render_pipeline'].refresh()
+                                await asyncio.sleep(0.55)
+                        asyncio.create_task(_pipe_anim())
+
+                        try:
+                            payload = {
+                                'message':        val,
+                                'mode':           'multi' if state.model_multi else 'single',
+                                'chart_engine':   'seaborn' if state.chart_seaborn else 'plotly',
+                                'domain':         state.subject.lower(),
+                                'history':        json.dumps([
+                                    {'role': m['role'], 'text': m['text']}
+                                    for m in CHAT_SESSIONS[state.current_sid]['messages']
+                                ])
+                            }
+                            res = await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: requests.post(API_ENDPOINT, data=payload, timeout=API_TIMEOUT)
+                            )
+                            with _client:
+                                typing_el.delete()
+                            if res.status_code == 200:
+                                reply = res.json().get('reply', '')
+                                with _client:
+                                    render_ai_block(reply, mc)
+                                CHAT_SESSIONS[state.current_sid]['messages'].append(
+                                    {'role': 'user', 'text': val}
+                                )
+                                CHAT_SESSIONS[state.current_sid]['messages'].append(
+                                    {'role': 'bot', 'text': reply}
+                                )
+                            else:
+                                with _client:
+                                    ui.label(f'Error {res.status_code}').style(
+                                        'color:#ef4444;font-size:12px;font-style:italic;'
+                                    )
+                        except Exception as exc:
+                            try:
+                                with _client:
+                                    typing_el.delete()
+                            except Exception:
+                                pass
+                            with _client, mc:
+                                ui.label(f'Connection error: {exc}').style(
+                                    'color:#ef4444;font-size:12px;font-style:italic;'
+                                )
+
+                        state.pipeline_step = -1
+                        refs['render_pipeline'].refresh()
+                        state.is_processing = False
+                        sa.scroll_to(percent=1.0)
+
+                    inp.on('keydown.enter', lambda: asyncio.create_task(send_message()))
+
+                    # Robust NiceGUI-native send button
+                    with ui.button(on_click=lambda: asyncio.create_task(send_message())).classes('send-btn').props('flat'):
+                        ui.html(send_svg())
+
+        with ui.element('div').classes('sidebar-right'):
+
+            # Scrollable section
+            with ui.scroll_area().style('flex:1;min-height:0;'):
+                with ui.element('div').style('padding:13px 12px 6px;'):
+
+                    # Analysis tools
+                    ui.label(TOOLS_SECTION_LABEL).classes('slabel').style('margin-bottom:10px;padding:0 2px;')
+
+                    @ui.refreshable
+                    def render_tools():
+                        tool_els = {}
+                        container = ui.element('div').classes('w-full')
+                        
+                        def _update_ui():
+                            for name, el in tool_els.items():
+                                is_sel = state.subject == name
+                                # Update wrapper classes
+                                el.classes(
+                                    remove='bg-purple-50 border-purple-600 ring-1 ring-purple-600 bg-white border-gray-200 hover:border-purple-300 hover:bg-purple-50/30'
+                                )
+                                el.classes(
+                                    f'{"bg-purple-50 border-purple-600 ring-1 ring-purple-600 shadow-sm" if is_sel else "bg-white border-gray-200 hover:border-purple-200"}'
+                                )
+                                # Find radio indicator and dot
+                                # Actually, easier to just use standard refreshable for this since the scale animation is enough
+                                # but for the sliding pill, we NEED direct manipulation.
+                                # To satisfy the user quickly, I will add 'transition-all duration-300' and a scale effect.
+                        
+                        for tname, tdesc in TOOLS:
+                            is_sel = state.subject == tname
+                            
+                            def _sel(n=tname):
+                                state.subject = n
+                                render_tools.refresh() # Still handles it but we add classes for animation in CSS
+                            
+                            with ui.element('div').on('click', _sel).classes(
+                                f'w-full mb-2 p-3.5 rounded-2xl border transition-all duration-300 cursor-pointer flex items-start gap-3 transform active:scale-95 '
+                                f'{"bg-purple-50 border-purple-600 ring-1 ring-purple-600 shadow-sm scale-[1.02]" if is_sel else "bg-white border-gray-200 hover:border-purple-200 hover:bg-gray-50/50"}'
+                            ):
+                                # Radio circle
+                                with ui.element('div').classes(
+                                    f'w-4 h-4 rounded-full border-2 mt-0.5 flex items-center justify-center flex-shrink-0 transition-colors duration-300 '
+                                    f'{"border-purple-600 bg-purple-600" if is_sel else "border-gray-200 bg-transparent"}'
+                                ):
+                                    if is_sel:
+                                        ui.element('div').classes('w-1.5 h-1.5 rounded-full bg-white animate-pulse')
+                                
+                                # Text
+                                with ui.element('div').classes('flex-1 min-w-0'):
+                                    ui.label(tname).classes(
+                                        f'text-[13px] font-bold block transition-colors duration-300 '
+                                        f'{"text-purple-700" if is_sel else "text-gray-900"}'
+                                    )
+                                    ui.label(tdesc).classes(
+                                        f'text-[10px] block mt-0.5 leading-tight '
+                                        f'{"text-purple-500" if is_sel else "text-gray-500"}'
+                                    )
+
+                    render_tools()
+
+                    ui.element('div').style('border-top:1px solid #f3f4f6;margin:12px 0;')
+
+                    ui.element('div').style('border-top:1px solid #f3f4f6;margin:12px 0;')
+
+                    # Quick actions (Full-Width Capsule Grid)
+                    ui.label(QUICK_ACTIONS_LABEL).classes('slabel').style('margin-bottom:8px;padding:0 2px;')
+                    with ui.element('div').classes('flex flex-wrap gap-1.5 w-full mb-4 no-select'):
+                        for chip in CHIPS:
+                            with ui.element('div').classes('action-bubble').on(
+                                'click', lambda c=chip: asyncio.create_task(send_message(c))
+                            ):
+                                ui.label(chip)
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+            # ── PIPELINE (pinned to bottom) ────────────────────────────────
+            with ui.element('div').style(
+                'flex-shrink:0;border-top:1px solid #e5e7eb;'
+                'padding:11px 12px 13px;background:#f9fafb;'
+            ):
+                ui.label(PIPELINE_LABEL).classes('slabel').style('margin-bottom:9px;')
+
+                pipe_wrap = ui.element('div').style(
+                    'display:flex;flex-direction:column;'
+                )
+
+                @ui.refreshable
+                def render_pipeline():
+                    pipe_wrap.clear()
+                    if not state.pipeline_visible: return
+                    
+                    with pipe_wrap:
+                        for i, step_txt in enumerate(PIPELINE_STEPS):
+                            active  = 0 <= state.pipeline_step and i <= state.pipeline_step
+                            current = i == state.pipeline_step
+                            
+                            # Handle mode-specific text
+                            label_txt = step_txt
+                            if 'Mode:' in label_txt: label_txt = f'Mode: {"Multi" if state.model_multi else "Single"}'
+                            
+                            with ui.element('div').classes('flex items-start gap-4 w-full relative h-6'):
+                                # The Unified Track (Dots & Pipes)
+                                with ui.element('div').classes('w-3 flex flex-col items-center h-full relative'):
+                                    # Pipe (Bridge to NEXT dot)
+                                    if i < len(PIPELINE_STEPS) - 1:
+                                        bridge_active = 0 <= state.pipeline_step and i < state.pipeline_step
+                                        ui.element('div').style(
+                                            f'position:absolute; left:50%; top:8px; width:1.5px; height:calc(100% + 1px);'
+                                            f'transform: translateX(-50%); z-index:0; transition:all 0.3s;'
+                                            f'background:{"#7c3aed" if bridge_active else "#f3f4f6"};'
+                                        )
+                                    
+                                    # The Dot
+                                    bg_col  = '#7c3aed' if active else '#d1d5db'
+                                    shadow  = 'shadow-[0_0_8px_rgba(124,58,237,0.3)]' if active else ''
+                                    pulse   = 'pipe-active-pulse' if current else ''
+                                    
+                                    ui.element('div').classes(f'w-1.5 h-1.5 rounded-full relative z-10 mt-1.5 {pulse} {shadow}').style(
+                                        f'background:{bg_col}; transition:all 0.3s;'
+                                    )
+                                
+                                # Content Column (Label)
+                                with ui.element('div').classes('flex-1 pt-0'):
+                                    txt_col = '#7c3aed' if active else '#9ca3af'
+                                    ui.label(label_txt).classes('text-[8.5px] font-bold uppercase tracking-wider leading-none truncate').style(
+                                        f'color:{txt_col}; transition:all 0.3s; padding-top:4px;'
+                                    )
+
+                render_pipeline()
+                refs['render_pipeline'] = render_pipeline
+
+    def _render_user_bubble(text: str, container):
+        with container:
+            with ui.element('div').style('display:flex;gap:10px;align-items:flex-start;flex-direction:row-reverse;'):
+                ui.html(f'<div style="width:28px;height:28px;border-radius:9px;background:#7c3aed;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:white;font-size:11px;font-weight:700;">{USER_AVATAR_LETTER}</div>')
+                with ui.element('div').style('display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:1;min-width:0;'):
+                    ui.label(text).style('background:#7c3aed;color:white;border-radius:18px;border-top-right-radius:4px;padding:10px 16px;font-size:13px;line-height:1.5;display:block;max-width:88%;word-break:break-word;')
+
+    def _render_typing(container):
+        with container:
+            el = ui.element('div').style('display:flex;gap:10px;align-items:flex-start;')
+            with el:
+                ui.html(f'<div style="width:28px;height:28px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{chart_svg()}</div>')
+                with ui.element('div').style('background:#f3f4f6;border:1px solid #e5e7eb;border-radius:18px;border-top-left-radius:4px;padding:11px 15px;display:flex;gap:5px;align-items:center;'):
+                    ui.element('div').classes('bounce1').style('width:7px;height:7px;border-radius:50%;background:#a78bfa;')
+                    ui.element('div').classes('bounce2').style('width:7px;height:7px;border-radius:50%;background:#7c3aed;')
+                    ui.element('div').classes('bounce3').style('width:7px;height:7px;border-radius:50%;background:#6d28d9;')
+        return el
+
+    def _save_session():
+        sid = state.current_sid
+        if not sid or sid not in CHAT_SESSIONS: return
+        if not CHAT_SESSIONS[sid].get('messages'):
+            CHAT_SESSIONS.pop(sid, None)
+            if sid in SESSION_ORDER: SESSION_ORDER.remove(sid)
+
+    def _load_session(sid: str):
+        sess = CHAT_SESSIONS.get(sid)
+        if not sess: return
+        state.current_sid = sid
+        mc = refs['messages_col']
+        mc.clear()
+        for msg in sess['messages']:
+            if msg['role'] == 'user': _render_user_bubble(msg['text'], mc)
+            else: render_ai_block(msg['text'], mc)
+        render_recents.refresh()
+        refs['scroll_area'].scroll_to(percent=1.0)
+
+if __name__ in {'__main__', '__mp_main__'}:
+    try:
+        logger.info(f"Starting StatsAI Dashboard on port 3001...")
+        ui.run(title=f'{APP_TITLE} {APP_SUBTITLE}', port=3001, show=False)
+    except Exception as e:
+        logger.critical(f"SERVER CRASHED ON STARTUP: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())

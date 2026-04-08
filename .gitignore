@@ -1,0 +1,18 @@
+# StatsAI Security Shield
+server/.env
+.statsai_vault/
+.env
+node_modules/
+server/node_modules/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Temporary Scratch Files
+fix_production_hub.py
+fix_main.py
+_gen_data_tmp.py
+fix_production_hub.py
+test_*.py
+!test_stats_ai_integrated.py
+!test_dynamic_pipeline.py

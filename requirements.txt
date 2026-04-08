@@ -1,0 +1,14 @@
+nicegui
+fastapi
+uvicorn
+requests
+groq
+cerebras-cloud-sdk
+matplotlib
+seaborn
+pandas
+numpy
+plotly
+pytest
+httpx
+python-multipart
