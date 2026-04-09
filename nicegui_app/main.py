@@ -388,8 +388,16 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 .q-focus-helper,.q-ripple,.q-btn__overlay{display:none!important;visibility:hidden!important;opacity:0!important}
 .q-btn:before{box-shadow:none!important}
 .q-btn:active{background:transparent!important}
-@keyframes pipe-pulse{0%,100%{transform:scale(1);opacity:1;box-shadow:0 0 0 rgba(124,58,237,0)}50%{transform:scale(1.3);opacity:.7;box-shadow:0 0 12px rgba(124,58,237,.5)}}
-.pipe-active-pulse{animation:pipe-pulse 1.2s ease-in-out infinite}
+@keyframes led-blink-green {
+    0%, 100% { background: #22c55e; box-shadow: 0 0 0 rgba(34, 197, 100, 0); }
+    50% { background: #4ade80; box-shadow: 0 0 10px rgba(34, 197, 100, 0.6); }
+}
+@keyframes led-blink-red {
+    0%, 100% { background: #ef4444; box-shadow: 0 0 0 rgba(239, 68, 68, 0); }
+    50% { background: #f87171; box-shadow: 0 0 10px rgba(239, 68, 68, 0.6); }
+}
+.led-green { animation: led-blink-green 1s ease-in-out infinite; }
+.led-red { animation: led-blink-red 0.6s ease-in-out infinite; }
 .q-field__control,.q-field__native{background:transparent!important}
 .q-field--outlined .q-field__control:before{border:none!important}
 .q-field--outlined .q-field__control:after{display:none!important}
@@ -399,7 +407,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 ::-webkit-scrollbar-thumb:hover{background:#9ca3af}
 .app-shell{display:flex;width:100vw;height:100vh;overflow:hidden;background:#fff;position:fixed;top:0;left:0}
 .sidebar-left{width:clamp(175px,16vw,225px);flex-shrink:0;background:#f9fafb;display:flex;flex-direction:column;height:100%;overflow:hidden;border-right:1px solid #e5e7eb}
-.sidebar-right{width:450px;flex-shrink:0;background:#fff;display:flex;flex-direction:column;height:100%;overflow:hidden;border-left:1px solid #e5e7eb}
+.sidebar-right{width:225px;flex-shrink:0;background:#fff;display:flex;flex-direction:column;height:100%;overflow:hidden;border-left:1px solid #e5e7eb}
 .chat-center{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff;height:100%;overflow:hidden}
 .nav-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;transition:background .15s;border:1px solid transparent;width:100%}
 .nav-item.active{background:#fff;border-color:#e5e7eb;font-weight:600;color:#111827}
@@ -426,8 +434,8 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
         processing = False
         multi      = False
         cur_sid    = None
-        pipe_step  = -1
-        pipe_vis   = False
+        model_name = 'Ready'
+        status_cls = ''
     s = S()
     refs = {}
 
@@ -588,24 +596,39 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                             SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':fake_reply}])
                         else:
                             try:
+                                s.status_cls = 'led-green'
+                                s.model_name = 'Inference...'
+                                refs['render_status'].refresh()
+                                
                                 import requests as req
                                 payload = {
                                     'message': val, 'mode': 'multi' if s.multi else 'single', 'domain': s.subject.lower(),
                                     'history': json.dumps([{'role':m['role'],'text':m['text']} for m in SESSIONS[s.cur_sid]['messages']])
                                 }
                                 res = await asyncio.get_event_loop().run_in_executor(None, lambda: req.post(API_URL, data=payload, timeout=API_TIMEOUT))
+                                
                                 try: typing.delete()
                                 except: pass
+                                
                                 if res.status_code == 200:
-                                    reply = res.json().get('reply','')
+                                    data = res.json()
+                                    reply = data.get('reply','')
+                                    s.model_name = data.get('model_used', 'Unknown Model')
+                                    s.status_cls = '' # stop blinking on success
                                     render_bot_block(reply, mc_ref)
                                     SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':reply}])
                                 else:
+                                    s.status_cls = 'led-red'
+                                    s.model_name = f'HTTP {res.status_code}'
                                     with mc_ref: ui.label(f'API error {res.status_code}').style('color:#ef4444;font-size:12px;font-style:italic;')
                             except Exception as exc:
                                 try: typing.delete()
                                 except: pass
+                                s.status_cls = 'led-red'
+                                s.model_name = 'Conn Error'
                                 with mc_ref: ui.label(f'Connection error: {exc}').style('color:#ef4444;font-size:12px;font-style:italic;')
+                            finally:
+                                refs['render_status'].refresh()
 
                         s.pipe_step  = -1
                         s.processing = False
@@ -616,39 +639,28 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                     with ui.button(on_click=lambda: asyncio.create_task(send_message())).classes('send-btn').props('flat'):
                         ui.html(icon_send())
 
-        # RIGHT SIDEBAR
+        # RIGHT SIDEBAR (Narrowed + Model Status)
         with ui.element('div').classes('sidebar-right'):
             with ui.scroll_area().style('flex:1;min-height:0;'):
-                with ui.element('div').style('padding:13px 12px 6px;'):
-                    ui.label('QUICK ACTIONS').classes('slabel').style('margin-bottom:8px;padding:0 2px;')
-                    with ui.element('div').classes('flex flex-wrap gap-1.5 w-full mb-4 no-select'):
-                        for chip in CHIPS:
-                            with ui.element('div').classes('action-bubble').on('click', lambda c=chip: asyncio.create_task(send_message(c))):
-                                ui.label(chip)
-
-            with ui.element('div').style('flex-shrink:0;border-top:1px solid #e5e7eb;padding:11px 12px 13px;background:#f9fafb;'):
-                ui.label('PIPELINE').classes('slabel').style('margin-bottom:9px;')
-                pipe_wrap = ui.element('div').style('display:flex;flex-direction:column;')
-                @ui.refreshable
-                def render_pipeline():
-                    pipe_wrap.clear()
-                    if not s.pipe_vis: return
-                    with pipe_wrap:
-                        for i, step in enumerate(PIPELINE_STEPS):
-                            active  = 0 <= s.pipe_step and i <= s.pipe_step
-                            current = i == s.pipe_step
-                            lbl = step
-                            if 'Mode' in lbl: lbl = f'Mode: {"Multi" if s.multi else "Single"}'
-                            with ui.element('div').classes('flex items-start gap-4 w-full relative h-6'):
-                                with ui.element('div').classes('w-3 flex flex-col items-center h-full relative'):
-                                    if i < len(PIPELINE_STEPS)-1:
-                                        ba = 0 <= s.pipe_step and i < s.pipe_step
-                                        ui.element('div').style(f'position:absolute;left:50%;top:8px;width:1.5px;height:calc(100% + 1px);transform:translateX(-50%);z-index:0;transition:all .3s;background:{"#7c3aed" if ba else "#f3f4f6"};')
-                                    ui.element('div').classes(f'w-1.5 h-1.5 rounded-full relative z-10 mt-1.5 {"pipe-active-pulse" if current else ""} {"shadow-[0_0_8px_rgba(124,58,237,0.3)]" if active else ""}'.strip()).style(f'background:{"#7c3aed" if active else "#d1d5db"};transition:all .3s;')
-                                with ui.element('div').classes('flex-1 pt-0'):
-                                    ui.label(lbl).classes('text-[8.5px] font-bold uppercase tracking-wider leading-none truncate').style(f'color:{"#7c3aed" if active else "#9ca3af"};transition:all .3s;padding-top:4px;')
-                render_pipeline()
-                refs['render_pipeline'] = render_pipeline
+                with ui.element('div').style('padding:20px 15px;'):
+                    ui.label('MODEL STATUS').classes('slabel').style('margin-bottom:15px;')
+                    
+                    @ui.refreshable
+                    def render_status():
+                        with ui.element('div').classes('bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col gap-3'):
+                            with ui.element('div').classes('flex items-center gap-3'):
+                                # LED INDICATOR: Blinks during inference or shows error
+                                ui.element('div').classes(f'w-2.5 h-2.5 rounded-full {s.status_cls if s.status_cls else "bg-gray-300"}')
+                                ui.label('Engine Status').classes('text-[11px] font-bold text-gray-400 uppercase tracking-wider')
+                            
+                            # ACTIVE MODEL NAME
+                            ui.label(s.model_name).classes('text-[13px] font-black text-purple-700 truncate')
+                            
+                    render_status()
+                    refs['render_status'] = render_status
+            
+            with ui.element('div').style('padding:15px; border-top:1px solid #f3f4f6;'):
+                ui.label('StatsAI v2.5').classes('text-[10px] text-gray-300 font-bold uppercase text-center w-full block')
 
     def _save_session():
         sid = s.cur_sid
