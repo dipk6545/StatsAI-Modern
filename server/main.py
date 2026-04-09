@@ -37,8 +37,7 @@ MODELS = {
     "reason": "llama-3.3-70b-specdec" # Deep reasoning (Cerebras naming)
 }
 
-CHART_KW = {"graph", "chart", "plot", "viz", "draw", "show", "curve", "distribution",
-            "histogram", "scatter", "box", "violin", "map", "table", "trend"}
+CHART_KW = {"graph", "chart", "plot", "viz", "draw", "visualize", "histogram", "scatterplot", "boxplot", "heatmap", "pareto", "waterfall"}
 
 # Counter for rotation
 _ROTATION_INDEX = 0
@@ -61,7 +60,10 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
                 f"  <explanation>Analysis here.</explanation>\n"
                 f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
     else:
-        hint = ("RESPONSE FORMAT:\n"
+        hint = ("STRICT VISUAL INHIBITION: The user did NOT ask for a chart or table. "
+                "DO NOT include any JSON, <chart_params>, or Plotly instructions. "
+                "Provide a 100% TEXT-ONLY conceptual explanation.\n\n"
+                "RESPONSE FORMAT:\n"
                 "  <explanation>Analysis here. NO CHART TAGS ALLOWED.</explanation>\n")
                 
     return f"{base}{hint}"
