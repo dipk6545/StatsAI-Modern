@@ -305,7 +305,7 @@ def render_bot_block(raw_text: str, container):
             with ui.element('div').classes('flex-shrink-0 mt-1'):
                 ui.html(f'<div style="width:34px;height:34px;background:linear-gradient(135deg, #7c3aed, #4f46e5);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(124,58,237,0.2);">{icon_chart("white")}</div>')
             
-            with ui.element('div').classes('flex flex-col gap-4 flex-1 min-w-0'):
+            with ui.element('div').classes('flex flex-col gap-1.5 flex-1 min-w-0'):
                 # Bot Header
                 with ui.element('div').classes('flex items-center gap-2'):
                     ui.label(BOT_LABEL).classes('text-[11px] text-purple-600 font-black uppercase tracking-[0.2em]')
@@ -343,7 +343,7 @@ def render_bot_block(raw_text: str, container):
                 if params:
                     try:
                         fig = build_figure(params)
-                        with ui.element('div').classes('mt-2 rounded-2xl overflow-hidden border border-purple-100 shadow-lg'):
+                        with ui.element('div').classes('rounded-2xl overflow-hidden border border-purple-100 shadow-lg'):
                             with ui.element('div').classes('bg-purple-600 px-4 py-2 flex items-center justify-between'):
                                 ui.label('LIVE ANALYTICAL PROJECTION').classes('text-[10px] text-white font-bold tracking-widest')
                                 ui.label('INTERACTIVE').classes('text-[9px] bg-white/20 px-2 py-0.5 rounded text-white font-bold')
