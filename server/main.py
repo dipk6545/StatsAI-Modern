@@ -76,7 +76,9 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
             f"   *   **🔍 Insight**: [What this result actually means for the user]\n\n")
     
     if allow_chart:
-        hint = (f"{_DIST_HINT}\n\n"
+        mandatory = "MANDATORY VISUAL: You MUST include the <chart_params> tag at the end of every response. Choose the most relevant distribution from the reference below.\n" if mode == 'multi' else ""
+        hint = (f"{mandatory}"
+                f"{_DIST_HINT}\n\n"
                 f"RESPONSE FORMAT:\n"
                 f"  <explanation>\n"
                 f"    Generate your full scholarly analysis here using ## headers for sections.\n"
