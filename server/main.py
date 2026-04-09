@@ -53,29 +53,32 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
     base = (f"You are a {role}. "
             f"STRICT HALLUCINATION GUARD: Do not invent statistics.\n"
             f"STYLE RULES:\n"
-            f" - Use Emojis and scannable Bullet Points.\n"
-            f" - MANDATORY: Use double newlines \\n\\n between ALL sections to ensure structure.\n"
-            f" - MATHEMATICS: Use standard LaTeX wrapped in $$ (e.g., $$f(x)=\\frac{{1}}{{x^2}}$$) for all formulas.\n"
+            f" - Use Emojis and scannable Bullet Points for all lists.\n"
+            f" - MANDATORY: Use double newlines \\n\\n between sections.\n"
+            f" - MATHEMATICS: Use 'Display Mode' LaTeX wrapped in $$ (e.g., $$\\int_{{a}}^{{b}} f(x)dx$$) for the main formula. "
+            f"Use 'Inline Mode' $...$ for variable definitions.\n"
             f" - Format your explanation as follows:\n\n"
-            f"   ### 📝 Summary\n"
-            f"   [Eye-catching summary with emojis]\n\n"
-            f"   ### 🔢 Formula\n"
-            f"   $$ [LaTeX Formula] $$\n\n"
-            f"   ### 🛠 Where to use\n"
-            f"   * [Use case 1]\n"
-            f"   * [Use case 2]\n\n"
-            f"   ### 💡 Example\n"
-            f"   [Concrete scenario]\n\n")
+            f"   ## 📝 Summary\n"
+            f"   [Professional high-level summary with emojis]\n\n"
+            f"   ## 🔢 Formula\n"
+            f"   $$ [Beautifully formatted LaTeX Display Formula] $$\n"
+            f"   *   **$V$**: [Variable definition]\n"
+            f"   *   **$X$**: [Variable definition]\n\n"
+            f"   ## 🛠 Where to use\n"
+            f"   *   **High-Intent Use 1**: [Description]\n"
+            f"   *   **High-Intent Use 2**: [Description]\n\n"
+            f"   ## 💡 Example\n"
+            f"   [Concrete realistic scenario description]\n\n")
     
     if allow_chart:
         hint = (f"{_DIST_HINT}\n\n"
                 f"RESPONSE FORMAT:\n"
-                f"  <explanation>Analysis here with double-newline sections.</explanation>\n"
+                f"  <explanation>Analysis with ## headers and Display LaTeX.</explanation>\n"
                 f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
     else:
         hint = ("STRICT VISUAL INHIBITION: The user did NOT ask for a chart. NO CHART TAGS.\n"
                 "RESPONSE FORMAT:\n"
-                "  <explanation>Analysis here with double-newline sections.</explanation>\n")
+                "  <explanation>Analysis with ## headers and Display LaTeX.</explanation>\n")
                 
     return f"{base}{hint}"
 
