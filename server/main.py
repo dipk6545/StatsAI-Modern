@@ -97,24 +97,25 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool, mode: str) -> st
 
 # ── CORE LOGIC ────────────────────────────────────────────────────────────────
 def _get_provider(force_groq: bool = False) -> Tuple[str, object, str]:
-    global _ROTATION_INDEX
-    
-    # Standard 70B reasoning model on Groq
+    # Groq High-Reasoning Model
     groq_70b = ("groq", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile")
-    
-    if force_groq and GROQ_KEY:
+    # Cerebras Speed Model
+    cere_8b  = ("cerebras", Cerebras(api_key=CERE_KEY), "llama3.1-8b")
+
+    if force_groq:
         return groq_70b
 
-    providers = []
-    if GROQ_KEY: providers.append(groq_70b)
-    if CERE_KEY: providers.append(("cerebras", Cerebras(api_key=CERE_KEY), "llama3.1-8b"))
+    # MULTI-MODEL STOCHASTIC SELECTION
+    # Logic: Pick 0-10, Even -> Groq, Odd -> Cerebras
+    ticket = random.randint(0, 10)
+    is_even = (ticket % 2 == 0)
     
-    if not providers: return "none", None, ""
+    logger.info(f"Stochastic Dispatch | Ticket: {ticket} | Choice: {'Groq' if is_even else 'Cerebras'}")
     
-    # Rotate
-    p_name, client, p_model = providers[_ROTATION_INDEX % len(providers)]
-    _ROTATION_INDEX += 1
-    return p_name, client, p_model
+    if is_even:
+        return groq_70b if GROQ_KEY else cere_8b
+    else:
+        return cere_8b if CERE_KEY else groq_70b
 
 def _resolve(message: str, mode: str, domain: str):
     msg = message.lower()
