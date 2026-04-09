@@ -78,12 +78,18 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
     if allow_chart:
         hint = (f"{_DIST_HINT}\n\n"
                 f"RESPONSE FORMAT:\n"
-                f"  <explanation>Analysis with ## headers and Calculated Example.</explanation>\n"
+                f"  <explanation>\n"
+                f"    Generate your full scholarly analysis here using ## headers for sections.\n"
+                f"    Include the Variable Table and Calculated Example as instructed.\n"
+                f"  </explanation>\n"
                 f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
     else:
         hint = ("STRICT VISUAL INHIBITION: The user did NOT ask for a chart. NO CHART TAGS.\n"
                 "RESPONSE FORMAT:\n"
-                "  <explanation>Analysis with ## headers and Calculated Example.</explanation>\n")
+                "  <explanation>\n"
+                "    Generate your full scholarly analysis here using ## headers for sections.\n"
+                "    Include the Variable Table and Calculated Example as instructed.\n"
+                "  </explanation>\n")
                 
     return f"{base}{hint}"
 
