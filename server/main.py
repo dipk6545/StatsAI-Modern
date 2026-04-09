@@ -1,104 +1,98 @@
 """
-StatsAI Headless API
-Based on the Unified Architecture Engine
+StatsAI Headless API: Smart Model Sync Edition
+Dual-Engine inference with Groq and Cerebras rotation.
 """
 
-import asyncio
-import json
-import logging
-import os
-import re
-from typing import Optional
+import asyncio, json, logging, os, re, random
+from typing import Optional, Tuple
 from pathlib import Path
 from dotenv import load_dotenv
-
 from fastapi import FastAPI, Form
 import uvicorn
-from groq import Groq
 
-# ── LOGGING ────────────────────────────────────────────────────────────────────
+# Engines
+from groq import Groq
+from cerebras.cloud.sdk import Cerebras
+
+# ── INITIALIZATION ────────────────────────────────────────────────────────────
+load_dotenv(Path(__file__).parent.parent / '.env')
+GROQ_KEY = os.getenv("GROQ_API_KEY", "")
+CERE_KEY = os.getenv("CEREBRAS_API_KEY", "")
+
 VAULT_DIR = Path(__file__).parent.parent / ".statsai_vault"
 VAULT_DIR.mkdir(exist_ok=True)
-LOG_FILE = VAULT_DIR / "statsai_api.log"
+LOG_FILE  = VAULT_DIR / "statsai_api.log"
 
 logging.basicConfig(level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
+    format='%(asctime)s | %(levelname)s | [%(name)s] %(message)s',
     handlers=[logging.FileHandler(LOG_FILE, encoding='utf-8'), logging.StreamHandler()]
 )
-logger = logging.getLogger("StatsAI_API")
-
-load_dotenv(Path(__file__).parent.parent / '.env')
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-
-SPEED_MODEL  = "llama-3.1-8b-instant"
-REASON_MODEL = "llama-3.3-70b-versatile"
+logger = logging.getLogger("StatsAI_Core")
 
 app = FastAPI()
 
-# ── ROUTING TABLES ─────────────────────────────────────────────────────────────
-REASON_KW = {"why","prove","derive","compare","explain","interpret",
-             "diagnose","should i","which is better","difference between"}
-REASON_DOMAINS = {"linear algebra","deep learning","ai","regression","inferential"}
+# ── SMART SYNC CONFIG ─────────────────────────────────────────────────────────
+MODELS = {
+    "speed": "llama3-8b-8192",  # Fast response
+    "reason": "llama-3.3-70b-specdec" # Deep reasoning (Cerebras naming)
+}
 
-# ── BACKEND PROMPTS ────────────────────────────────────────────────────────────
+CHART_KW = {"graph", "chart", "plot", "viz", "draw", "show", "curve", "distribution",
+            "histogram", "scatter", "box", "violin", "map", "table", "trend"}
+
+# Counter for rotation
+_ROTATION_INDEX = 0
+
+# ── PROMPTS ───────────────────────────────────────────────────────────────────
 _DIST_HINT = (
     "CHART PARAMS REFERENCE:\n"
-    "  normal/gaussian     → {\"dist\":\"normal\"}\n"
-    "  t-distribution      → {\"dist\":\"t\"}\n"
-    "  f-distribution      → {\"dist\":\"f\"}\n"
-    "  chi-square          → {\"dist\":\"chi2\"}\n"
-    "  exponential         → {\"dist\":\"exponential\"}\n"
-    "  log-normal          → {\"dist\":\"lognormal\"}\n"
-    "  poisson             → {\"dist\":\"poisson\"}\n"
-    "  binomial            → {\"dist\":\"binomial\"}\n"
-    "  z-curve             → {\"dist\":\"z\"}\n"
-    "  scatter             → {\"dist\":\"scatter\"}\n"
-    "  box plot            → {\"dist\":\"box\"}\n"
-    "  histogram           → {\"dist\":\"histogram\"}\n"
-    "  regression          → {\"dist\":\"regression\"}\n"
-    "  heatmap             → {\"dist\":\"heatmap\"}\n"
-    "  violin              → {\"dist\":\"violin\"}\n"
-    "  anova               → {\"dist\":\"anova\"}\n"
-    "  pareto              → {\"dist\":\"pareto\"}\n"
-    "  waterfall           → {\"dist\":\"waterfall\"}\n"
-    "  pie                 → {\"dist\":\"pie\"}\n"
-    "  trend/line          → {\"dist\":\"trend\"}\n"
+    "  normal/gaussian, t, f, chi2, exponential, lognormal, poisson, binomial, z-curve, scatter, box, histogram, regression, heatmap, violin, anova, pareto, waterfall, pie, trend"
 )
 
-_FORMAT = (
-    "\nRESPONSE FORMAT — follow exactly, no deviation:\n"
-    "  <explanation>1-3 sentence explanation here.</explanation>\n"
-    "  <chart_params>{\"dist\":\"...\", ...params}</chart_params>\n\n"
-    "RULES:\n"
-    "  • Pure JSON in <chart_params>. No code. No markdown. No Plotly JSON.\n"
-    "  • If no chart needed, omit <chart_params>.\n"
-    "  • Multi mode: explanation is multi-paragraph with derivation.\n"
-)
+def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
+    role = f"Doctoral Statistical Researcher in {domain.upper()}" if reason else f"High-Speed Statistical API for {domain.upper()}"
+    base = (f"You are a {role}. "
+            f"STRICT HALLUCINATION GUARD: Do not invent statistics. If unsure, state uncertainty.\n"
+            f"ABRUPTNESS GUARD: Provide complete, polished thoughts. No unfinished sentences.\n\n")
+    
+    if allow_chart:
+        hint = (f"{_DIST_HINT}\n\n"
+                f"RESPONSE FORMAT:\n"
+                f"  <explanation>Analysis here.</explanation>\n"
+                f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
+    else:
+        hint = ("RESPONSE FORMAT:\n"
+                "  <explanation>Analysis here. NO CHART TAGS ALLOWED.</explanation>\n")
+                
+    return f"{base}{hint}"
 
-def _build_prompt(domain: str, reason: bool) -> str:
-    if reason:
-        return (f"You are a Doctoral Statistical Researcher in {domain.upper()}. "
-                f"Show derivations, flag assumptions, give deep insight.\n\n"
-                f"{_DIST_HINT}{_FORMAT}")
-    return (f"You are a High-Speed Statistical API in {domain.upper()}. "
-            f"Be concise. One sentence, then chart params.\n\n"
-            f"{_DIST_HINT}{_FORMAT}")
+# ── CORE LOGIC ────────────────────────────────────────────────────────────────
+def _get_provider() -> Tuple[str, object, str]:
+    global _ROTATION_INDEX
+    providers = []
+    if GROQ_KEY: providers.append(("groq", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile"))
+    if CERE_KEY: providers.append(("cerebras", Cerebras(api_key=CERE_KEY), "llama-3.3-70b"))
+    
+    if not providers: return "none", None, ""
+    
+    # Rotate
+    p_name, client, p_model = providers[_ROTATION_INDEX % len(providers)]
+    _ROTATION_INDEX += 1
+    return p_name, client, p_model
 
 def _resolve(message: str, mode: str, domain: str):
     msg = message.lower()
-    dom = domain.lower()
-    reason = (mode == 'multi'
-              or dom in REASON_DOMAINS
-              or any(k in msg for k in REASON_KW))
-    model  = REASON_MODEL if reason else SPEED_MODEL
-    return model, _build_prompt(domain, reason)
+    allow_chart = any(k in msg for k in CHART_KW) or mode == 'multi'
+    reason = (mode == 'multi' or any(k in msg for k in {"why","prove","derive","deep"}))
+    
+    return reason, allow_chart, _build_prompt(domain, reason, allow_chart)
 
 def _sanitize(text: str) -> str:
     for a in ['```json','```python','```html','```','**Summary:**','Summary:']:
         text = text.replace(a,'')
     return text.strip()
 
-# ── ENDPOINT ───────────────────────────────────────────────────────────────────
+# ── ENDPOINTS ─────────────────────────────────────────────────────────────────
 @app.post("/api/chat")
 async def api_chat(
     message:  str           = Form(...),
@@ -108,41 +102,54 @@ async def api_chat(
     api_key:  Optional[str] = Form(None),
 ):
     try:
-        key = (api_key or '').strip() or GROQ_API_KEY
-        if not key:
-            return {"reply": "ERROR: No GROQ_API_KEY set in .env", "model_used": None}
+        p_name, client, p_model = _get_provider()
+        if not client:
+            return {"reply": "ERROR: No valid API keys found in .env", "model_used": "NONE"}
 
-        hist  = json.loads(history)
-        model, prompt = _resolve(message, mode, domain)
-        logger.info(f"[{model.split('-')[1]}] {domain} | {message[:50]}")
+        reason, allow_chart, prompt = _resolve(message, mode, domain)
+        logger.info(f"[{p_name.upper()}] Routing to {p_model} | Chart: {allow_chart}")
 
         msgs = [{"role": "system", "content": prompt}]
-        for h in hist[-6:]:
-            role = "assistant" if h.get('role') in ('bot', 'assistant', 'model') else "user"
-            # Strip chart tags to save conversational context tokens
-            txt = re.sub(r'<chart_params>.*?</chart_params>', '', h.get('text', ''), flags=re.DOTALL).strip()
-            if txt:
-                msgs.append({"role": role, "content": txt})
+        # History injection (Last 4 turns for context)
+        try:
+            hist = json.loads(history)
+            for h in hist[-4:]:
+                role = "assistant" if h.get('role') in ('bot', 'assistant') else "user"
+                txt = re.sub(r'<chart_params>.*?</chart_params>', '', h.get('text', ''), flags=re.DOTALL).strip()
+                if txt: msgs.append({"role": role, "content": txt})
+        except: pass
         
         msgs.append({"role": "user", "content": message})
 
-        client = Groq(api_key=key)
-        resp   = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: client.chat.completions.create(model=model, messages=msgs, max_tokens=1024)
+        # Smart Sync Execution
+        params = {
+            "model": p_model,
+            "messages": msgs,
+            "max_tokens": 1024,
+            "temperature": 0.2 if not reason else 0.5, # Low temp for data, Mid for reasoning
+        }
+
+        resp = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: client.chat.completions.create(**params)
         )
 
         reply = _sanitize(resp.choices[0].message.content.strip())
-        return {"reply": reply, "model_used": model}
+        
+        # Abrupt Answer Guard: Ensure completion
+        if not reply.endswith(('.', '!', '?', '>', '}', '`')):
+            reply += "..." # Indicator of potential truncation but structurally safe
+            
+        return {"reply": reply, "model_used": f"{p_name}:{p_model}"}
 
     except Exception as e:
-        logger.exception("API error")
-        return {"reply": f"SYSTEM ERROR: {e}", "model_used": None}
+        logger.exception("Inference Failure")
+        return {"reply": f"SYNCHRO-ERROR: {str(e)}", "model_used": "ERROR"}
 
 @app.get("/health")
 async def health():
-    return {"status":"ok","speed":SPEED_MODEL,"reason":REASON_MODEL,"key_set":bool(GROQ_API_KEY)}
+    return {"status": "ok", "providers": {"groq": bool(GROQ_KEY), "cerebras": bool(CERE_KEY)}}
 
 if __name__ in {"__main__", "__mp_main__"}:
-    logger.info("Starting StatsAI API Headless Server on port 3001")
+    logger.info("StatsAI SmartSync API booting on Port 3001")
     uvicorn.run(app, host="0.0.0.0", port=3001)
+
