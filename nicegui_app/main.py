@@ -328,11 +328,16 @@ def render_bot_block(raw_text: str, container):
                         # Handle Math Blocks: Use markdown but trigger re-render
                         chunks = re.split(r'(\$\$.*?\$\$)', body, flags=re.DOTALL)
                         for chunk in chunks:
-                            if chunk.strip():
+                            if not chunk.strip(): continue
+                            # If it's a display math block, enlarge it
+                            if chunk.startswith('$$'):
+                                with ui.element('div').classes('py-6 flex justify-center bg-purple-50/30 rounded-xl my-4 border border-purple-100/50'):
+                                    ui.markdown(chunk.strip()).classes('text-2xl text-purple-900 math-target')
+                            else:
                                 ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 leading-relaxed math-target')
                 
                 # Trigger KaTeX Re-render for dynamic content
-                ui.run_javascript('if(window.renderMathInElement) renderMathInElement(document.body);')
+                ui.run_javascript('if(window.renderMathInElement) renderMathInElement(document.body, {delimiters: [{left: "$$", right: "$$", display: true}, {left: "$", right: "$", display: false}, {left: "\\\\(", right: "\\\\)", display: false}]});')
 
                 # Interactive Visualization Hook
                 if params:
