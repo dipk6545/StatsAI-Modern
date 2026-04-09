@@ -51,26 +51,31 @@ _DIST_HINT = (
 def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
     role = f"Doctoral Statistical Researcher in {domain.upper()}" if reason else f"High-Speed Statistical API for {domain.upper()}"
     base = (f"You are a {role}. "
-            f"STRICT HALLUCINATION GUARD: Do not invent statistics. If unsure, state uncertainty.\n"
-            f"ABRUPTNESS GUARD: Provide complete thoughts.\n\n"
+            f"STRICT HALLUCINATION GUARD: Do not invent statistics.\n"
             f"STYLE RULES:\n"
-            f" - Use Emojis and Bullet Points for readability.\n"
-            f" - Use proper mathematical symbols for formulas (e.g., x², σ, μ, √, ÷, π) instead of ^ or /.\n"
-            f" - Format your explanation as follows:\n"
-            f"   • Summary with descriptive emojis\n"
-            f"   • 🔢 Formula: [Unicode symbols]\n"
-            f"   • 🛠 Where to use: [Practical use cases]\n"
-            f"   • 💡 Example: [Realistic scenario]\n\n")
+            f" - Use Emojis and scannable Bullet Points.\n"
+            f" - MANDATORY: Use double newlines \\n\\n between ALL sections to ensure structure.\n"
+            f" - MATHEMATICS: Use standard LaTeX wrapped in $$ (e.g., $$f(x)=\\frac{1}{x^2}$$) for all formulas.\n"
+            f" - Format your explanation as follows:\n\n"
+            f"   ### 📝 Summary\n"
+            f"   [Eye-catching summary with emojis]\n\n"
+            f"   ### 🔢 Formula\n"
+            f"   $$ [LaTeX Formula] $$\n\n"
+            f"   ### 🛠 Where to use\n"
+            f"   * [Use case 1]\n"
+            f"   * [Use case 2]\n\n"
+            f"   ### 💡 Example\n"
+            f"   [Concrete scenario]\n\n")
     
     if allow_chart:
         hint = (f"{_DIST_HINT}\n\n"
                 f"RESPONSE FORMAT:\n"
-                f"  <explanation>Analysis here with sections.</explanation>\n"
+                f"  <explanation>Analysis here with double-newline sections.</explanation>\n"
                 f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
     else:
         hint = ("STRICT VISUAL INHIBITION: The user did NOT ask for a chart. NO CHART TAGS.\n"
                 "RESPONSE FORMAT:\n"
-                "  <explanation>Analysis here with sections.</explanation>\n")
+                "  <explanation>Analysis here with double-newline sections.</explanation>\n")
                 
     return f"{base}{hint}"
 
