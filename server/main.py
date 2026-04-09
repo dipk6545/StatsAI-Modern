@@ -55,7 +55,8 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
             f"STYLE RULES:\n"
             f" - Use Emojis and scannable sections.\n"
             f" - MANDATORY: Use double newlines \\n\\n between sections.\n"
-            f" - MATHEMATICS: Use 'Display Mode' ($$...$$) for the main formula and 'Inline Mode' ($...$) for single variables.\n"
+            f" - MATHEMATICS: Use 'Display Mode' ($$...$$) for the main formula. "
+            f"Use 'Inline Mode' with parentheses (\\\\( symbol \\\\)) for single variables.\n"
             f" - VARIABLE LEGEND: Always use a Markdown Table to define variables in the Formula section.\n\n"
             f" Format your explanation as follows:\n\n"
             f"   ## 📝 Summary\n"
@@ -64,9 +65,9 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
             f"   $$ [Beautifully formatted LaTeX Display Formula] $$\n\n"
             f"   | Symbol | Parameter | Description |\n"
             f"   | :--- | :--- | :--- |\n"
-            f"   | $X$ | Value | [Definition] |\n"
-            f"   | $\\mu$ | Mean | [Definition] |\n"
-            f"   | $\\sigma$ | Std Dev | [Definition] |\n\n"
+            f"   | **\\\\( x \\\\)** | Value | [Definition] |\n"
+            f"   | **\\\\( \\\\mu \\\\)** | Mean | [Definition] |\n"
+            f"   | **\\\\( \\\\sigma \\\\)** | Std Dev | [Definition] |\n\n"
             f"   ## 🛠 Where to use\n"
             f"   *   **Application 1**: [Description]\n"
             f"   *   **Application 2**: [Description]\n\n"
@@ -76,12 +77,12 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
     if allow_chart:
         hint = (f"{_DIST_HINT}\n\n"
                 f"RESPONSE FORMAT:\n"
-                f"  <explanation>Analysis with ## headers and Variable Table.</explanation>\n"
+                f"  <explanation>Analysis with ## headers and Legend Table.</explanation>\n"
                 f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
     else:
         hint = ("STRICT VISUAL INHIBITION: The user did NOT ask for a chart. NO CHART TAGS.\n"
                 "RESPONSE FORMAT:\n"
-                "  <explanation>Analysis with ## headers and Variable Table.</explanation>\n")
+                "  <explanation>Analysis with ## headers and Legend Table.</explanation>\n")
                 
     return f"{base}{hint}"
 
