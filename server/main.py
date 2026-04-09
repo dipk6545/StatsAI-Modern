@@ -48,7 +48,7 @@ _DIST_HINT = (
     "  normal/gaussian, t, f, chi2, exponential, lognormal, poisson, binomial, z-curve, scatter, box, histogram, regression, heatmap, violin, anova, pareto, waterfall, pie, trend"
 )
 
-def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
+def _build_prompt(domain: str, reason: bool, allow_chart: bool, mode: str) -> str:
     role = f"Doctoral Statistical Researcher in {domain.upper()}" if reason else f"High-Speed Statistical API for {domain.upper()}"
     base = (f"You are a {role}. "
             f"STRICT HALLUCINATION GUARD: Do not invent statistics.\n"
@@ -121,7 +121,7 @@ def _resolve(message: str, mode: str, domain: str):
     allow_chart = any(k in msg for k in CHART_KW) or mode == 'multi'
     reason = (mode == 'multi' or any(k in msg for k in {"why","prove","derive","deep"}))
     
-    return reason, allow_chart, _build_prompt(domain, reason, allow_chart)
+    return reason, allow_chart, _build_prompt(domain, reason, allow_chart, mode)
 
 def _sanitize(text: str) -> str:
     for a in ['```json','```python','```html','```','**Summary:**','Summary:']:
