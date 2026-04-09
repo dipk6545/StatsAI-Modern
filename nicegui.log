@@ -1575,3 +1575,4 @@ NameError: name 'render_recents' is not defined
 2026-04-09 22:54:08,180 | INFO | Generating data for pie. Random check: 0.3399076992805645
 2026-04-09 22:55:58,652 | INFO | Generating data for z. Random check: 0.040719807554515874
 2026-04-09 22:56:00,799 | INFO | Generating data for z. Random check: 0.5666248697926782
+2026-04-09 23:06:16,620 | INFO | Starting StatsAI Unified UI Frontend on port 8080...

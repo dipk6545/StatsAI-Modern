@@ -71,7 +71,7 @@ def _get_provider() -> Tuple[str, object, str]:
     global _ROTATION_INDEX
     providers = []
     if GROQ_KEY: providers.append(("groq", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile"))
-    if CERE_KEY: providers.append(("cerebras", Cerebras(api_key=CERE_KEY), "llama-3.3-70b"))
+    if CERE_KEY: providers.append(("cerebras", Cerebras(api_key=CERE_KEY), "llama3.1-8b"))
     
     if not providers: return "none", None, ""
     
@@ -102,44 +102,55 @@ async def api_chat(
     api_key:  Optional[str] = Form(None),
 ):
     try:
+        # Resolve logic once
+        reason, allow_chart, prompt = _resolve(message, mode, domain)
+        
+        # Primary Provider
         p_name, client, p_model = _get_provider()
         if not client:
             return {"reply": "ERROR: No valid API keys found in .env", "model_used": "NONE"}
 
-        reason, allow_chart, prompt = _resolve(message, mode, domain)
         logger.info(f"[{p_name.upper()}] Routing to {p_model} | Chart: {allow_chart}")
 
         msgs = [{"role": "system", "content": prompt}]
-        # History injection (Last 4 turns for context)
         try:
             hist = json.loads(history)
             for h in hist[-4:]:
                 role = "assistant" if h.get('role') in ('bot', 'assistant') else "user"
-                txt = re.sub(r'<chart_params>.*?</chart_params>', '', h.get('text', ''), flags=re.DOTALL).strip()
+                txt = h.get('text', '')
+                txt = re.sub(r'<chart_params>.*?</chart_params>', '', txt, flags=re.DOTALL).strip()
                 if txt: msgs.append({"role": role, "content": txt})
         except: pass
-        
         msgs.append({"role": "user", "content": message})
 
-        # Smart Sync Execution
-        params = {
+        request_params = {
             "model": p_model,
             "messages": msgs,
             "max_tokens": 1024,
-            "temperature": 0.2 if not reason else 0.5, # Low temp for data, Mid for reasoning
+            "temperature": 0.2 if not reason else 0.5,
         }
 
-        resp = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: client.chat.completions.create(**params)
-        )
+        try:
+            # TRY PRIMARY
+            resp = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: client.chat.completions.create(**request_params)
+            )
+        except Exception as e:
+            # FALLBACK TO GROQ IF PRIMARY (CEREBRAS) FAILS
+            if p_name != "groq" and GROQ_KEY:
+                logger.warning(f"Primary {p_name} failed: {e}. Falling back to GROQ...")
+                g_client = Groq(api_key=GROQ_KEY)
+                request_params["model"] = "llama-3.3-70b-versatile"
+                resp = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: g_client.chat.completions.create(**request_params)
+                )
+                p_name = "groq-fallback"
+            else: raise e
 
         reply = _sanitize(resp.choices[0].message.content.strip())
-        
-        # Abrupt Answer Guard: Ensure completion
-        if not reply.endswith(('.', '!', '?', '>', '}', '`')):
-            reply += "..." # Indicator of potential truncation but structurally safe
+        if not reply.endswith(('.', '!', '?', '>', '}', '`')): reply += "..."
             
-        return {"reply": reply, "model_used": f"{p_name}:{p_model}"}
+        return {"reply": reply, "model_used": f"{p_name}:{request_params['model']}"}
 
     except Exception as e:
         logger.exception("Inference Failure")
