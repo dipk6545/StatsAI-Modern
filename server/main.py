@@ -52,6 +52,7 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool, mode: str) -> st
     role = f"Doctoral Statistical Researcher in {domain.upper()}" if reason else f"High-Speed Statistical API for {domain.upper()}"
     base = (f"You are a {role}. "
             f"STRICT HALLUCINATION GUARD: Do not invent statistics.\n"
+            f"RELATIONAL MEMORY: You have access to the last 10 messages of history. Always maintain continuity, refer back to previous results/variables if relevant, and build upon the existing context.\n"
             f"STYLE RULES:\n"
             f" - Use Emojis and scannable sections.\n"
             f" - MANDATORY: Use double newlines \\n\\n between sections.\n"
@@ -154,7 +155,8 @@ async def api_chat(
         msgs = [{"role": "system", "content": prompt}]
         try:
             hist = json.loads(history)
-            for h in hist[-4:]:
+            # Support longer memory (last 10 items / 5 turns)
+            for h in hist[-10:]:
                 role = "assistant" if h.get('role') in ('bot', 'assistant') else "user"
                 txt = h.get('text', '')
                 txt = re.sub(r'<chart_params>.*?</chart_params>', '', txt, flags=re.DOTALL).strip()
