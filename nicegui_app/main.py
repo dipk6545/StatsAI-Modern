@@ -291,31 +291,62 @@ def _parse_params(text: str) -> dict | None:
     return None
 
 def render_bot_block(raw_text: str, container):
-    expl_m   = _EXPL_RE.search(raw_text)
-    params   = _parse_params(raw_text)
-    plain    = re.sub(r'<(?:explanation|chart_params|plotly_table)>.*?</(?:explanation|chart_params|plotly_table)>', '', raw_text, flags=re.DOTALL).strip()
-    plain    = re.sub(r'<[^>]+>', '', plain).strip()
+    # Regex for section extraction
+    sections = re.split(r'##\s*(.*?)\n', raw_text)
+    # sections[0] is intro, [1]=Header1, [2]=Content1, [3]=Header2, [4]=Content2...
+    
+    params = _parse_params(raw_text)
+    expl_m = _EXPL_RE.search(raw_text)
+    content = expl_m.group(1).strip() if expl_m else raw_text
 
     with container:
-        with ui.element('div').classes('flex gap-2.5 items-start w-full'):
-            ui.html(f'<div style="width:28px;height:28px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{icon_chart()}</div>')
-            with ui.element('div').classes('flex flex-col gap-2 flex-1 min-w-0'):
-                with ui.element('div').classes('flex items-center gap-1.5 mb-0.5'):
-                    ui.html(f'<span style="display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:50%;background:#7c3aed;flex-shrink:0;">{icon_check()}</span>')
-                    ui.label(BOT_LABEL).classes('text-[10px] text-gray-400 font-bold uppercase tracking-wider')
+        with ui.element('div').classes('flex gap-3 items-start w-full mb-6'):
+            # Bot Avatar
+            with ui.element('div').classes('flex-shrink-0 mt-1'):
+                ui.html(f'<div style="width:34px;height:34px;background:linear-gradient(135deg, #7c3aed, #4f46e5);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(124,58,237,0.2);">{icon_chart("white")}</div>')
+            
+            with ui.element('div').classes('flex flex-col gap-4 flex-1 min-w-0'):
+                # Bot Header
+                with ui.element('div').classes('flex items-center gap-2'):
+                    ui.label(BOT_LABEL).classes('text-[11px] text-purple-600 font-black uppercase tracking-[0.2em]')
+                    ui.element('div').classes('h-[1px] flex-1 bg-gradient-to-r from-purple-100 to-transparent')
 
-                if expl_m:
-                    ui.markdown(expl_m.group(1).strip()).classes('bg-gray-100 border border-gray-200 rounded-2xl rounded-tl-sm p-4 text-[13px] text-gray-800 leading-relaxed w-full')
-                elif plain:
-                    ui.markdown(plain).classes('bg-gray-100 border border-gray-200 rounded-2xl rounded-tl-sm p-4 text-[13px] text-gray-800 leading-relaxed w-full')
+                # Sectioned Card Engine
+                parts = re.split(r'##\s*', content)
+                for part in parts:
+                    if not part.strip(): continue
+                    lines = part.strip().split('\n', 1)
+                    title = lines[0].strip()
+                    body  = lines[1].strip() if len(lines) > 1 else ""
 
+                    with ui.element('div').classes('bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-300'):
+                        # Card Header
+                        with ui.element('div').classes('bg-gray-50/50 px-4 py-2.5 border-b border-gray-50 flex items-center justify-between'):
+                            ui.label(title).classes('text-[13px] font-bold text-gray-700 flex items-center gap-2')
+                        
+                        # Card Body
+                        with ui.element('div').classes('p-4'):
+                            # Handle Math Blocks separately for KaTeX
+                            math_blocks = re.split(r'\$\$(.*?)\$\$', body, flags=re.DOTALL)
+                            for i, chunk in enumerate(math_blocks):
+                                if i % 2 == 1: # Math Chunk
+                                    with ui.element('div').classes('py-4 flex justify-center bg-purple-50/50 rounded-xl my-2 border border-purple-100'):
+                                        ui.katex(chunk.strip()).classes('text-lg text-purple-800')
+                                else: # Text/Markdown Chunk
+                                    if chunk.strip():
+                                        ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 leading-relaxed')
+
+                # Interactive Visualization Hook
                 if params:
                     try:
                         fig = build_figure(params)
-                        with ui.element('div').style('width:100%;border-radius:12px;overflow:hidden;border:1px solid #f3f4f6;margin-top:2px;'):
-                            ui.plotly(fig.to_dict()).classes('w-full').style('height:340px;')
+                        with ui.element('div').classes('mt-2 rounded-2xl overflow-hidden border border-purple-100 shadow-lg'):
+                            with ui.element('div').classes('bg-purple-600 px-4 py-2 flex items-center justify-between'):
+                                ui.label('LIVE ANALYTICAL PROJECTION').classes('text-[10px] text-white font-bold tracking-widest')
+                                ui.label('INTERACTIVE').classes('text-[9px] bg-white/20 px-2 py-0.5 rounded text-white font-bold')
+                            ui.plotly(fig.to_dict()).classes('w-full').style('height:380px;background:white;')
                     except Exception as e:
-                        ui.label(f'Chart error: {e}').classes('text-red-400 text-xs italic mt-1')
+                        ui.label(f'DYNAMICS ERROR: {e}').classes('text-red-400 text-[10px] italic p-4 bg-red-50 rounded-xl')
 
 def render_user_bubble(text: str, container):
     with container:
