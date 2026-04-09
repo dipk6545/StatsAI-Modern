@@ -56,33 +56,34 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
             f" - Use Emojis and scannable sections.\n"
             f" - MANDATORY: Use double newlines \\n\\n between sections.\n"
             f" - MATHEMATICS: Use 'Display Mode' ($$...$$) for the main formula. "
-            f"Use 'Inline Mode' with parentheses (\\\\( symbol \\\\)) for single variables.\n"
-            f" - VARIABLE LEGEND: Always use a Markdown Table to define variables in the Formula section.\n\n"
+            f"Use 'Inline Mode' (\\\\( symbol \\\\)) for variables.\n"
+            f" - VARIABLE LEGEND: Always use a Markdown Table to define variables.\n"
+            f" - CALCULATED EXAMPLES: In the Example section, do NOT just describe. PERFORM a step-by-step calculation. "
+            f"Show the derivation (e.g., Z-scores, Empirical Rule) and provide a 'So What?' practical insight.\n\n"
             f" Format your explanation as follows:\n\n"
             f"   ## 📝 Summary\n"
             f"   [Professional high-level summary with emojis]\n\n"
             f"   ## 🔢 Formula\n"
-            f"   $$ [Beautifully formatted LaTeX Display Formula] $$\n\n"
+            f"   $$ [LaTeX Display Formula] $$\n\n"
             f"   | Symbol | Parameter | Description |\n"
             f"   | :--- | :--- | :--- |\n"
-            f"   | **\\\\( x \\\\)** | Value | [Definition] |\n"
-            f"   | **\\\\( \\\\mu \\\\)** | Mean | [Definition] |\n"
-            f"   | **\\\\( \\\\sigma \\\\)** | Std Dev | [Definition] |\n\n"
+            f"   | [Variable] | [Name] | [Definition] |\n\n"
             f"   ## 🛠 Where to use\n"
-            f"   *   **Application 1**: [Description]\n"
-            f"   *   **Application 2**: [Description]\n\n"
-            f"   ## 💡 Example\n"
-            f"   [Concrete realistic scenario description]\n\n")
+            f"   *   **Application 1**: [Description]\n\n"
+            f"   ## 💡 Calculated Example\n"
+            f"   *   **Scenario**: [Specific scenario]\n"
+            f"   *   **Calculation**: [Step-by-step math using variables]\n"
+            f"   *   **🔍 Insight**: [What this result actually means for the user]\n\n")
     
     if allow_chart:
         hint = (f"{_DIST_HINT}\n\n"
                 f"RESPONSE FORMAT:\n"
-                f"  <explanation>Analysis with ## headers and Legend Table.</explanation>\n"
+                f"  <explanation>Analysis with ## headers and Calculated Example.</explanation>\n"
                 f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
     else:
         hint = ("STRICT VISUAL INHIBITION: The user did NOT ask for a chart. NO CHART TAGS.\n"
                 "RESPONSE FORMAT:\n"
-                "  <explanation>Analysis with ## headers and Legend Table.</explanation>\n")
+                "  <explanation>Analysis with ## headers and Calculated Example.</explanation>\n")
                 
     return f"{base}{hint}"
 
