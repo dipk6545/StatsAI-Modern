@@ -88,10 +88,17 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
     return f"{base}{hint}"
 
 # ── CORE LOGIC ────────────────────────────────────────────────────────────────
-def _get_provider() -> Tuple[str, object, str]:
+def _get_provider(force_groq: bool = False) -> Tuple[str, object, str]:
     global _ROTATION_INDEX
+    
+    # Standard 70B reasoning model on Groq
+    groq_70b = ("groq", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile")
+    
+    if force_groq and GROQ_KEY:
+        return groq_70b
+
     providers = []
-    if GROQ_KEY: providers.append(("groq", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile"))
+    if GROQ_KEY: providers.append(groq_70b)
     if CERE_KEY: providers.append(("cerebras", Cerebras(api_key=CERE_KEY), "llama3.1-8b"))
     
     if not providers: return "none", None, ""
@@ -126,8 +133,10 @@ async def api_chat(
         # Resolve logic once
         reason, allow_chart, prompt = _resolve(message, mode, domain)
         
-        # Primary Provider
-        p_name, client, p_model = _get_provider()
+        # Decide search strategy based on mode
+        is_multi = (mode == 'multi')
+        p_name, client, p_model = _get_provider(force_groq=not is_multi)
+        
         if not client:
             return {"reply": "ERROR: No valid API keys found in .env", "model_used": "NONE"}
 
