@@ -324,17 +324,15 @@ def render_bot_block(raw_text: str, container):
                         with ui.element('div').classes('bg-gray-50/50 px-4 py-2.5 border-b border-gray-50 flex items-center justify-between'):
                             ui.label(title).classes('text-[13px] font-bold text-gray-700 flex items-center gap-2')
                         
-                        # Card Body
-                        with ui.element('div').classes('p-4'):
-                            # Handle Math Blocks separately for KaTeX
-                            math_blocks = re.split(r'\$\$(.*?)\$\$', body, flags=re.DOTALL)
-                            for i, chunk in enumerate(math_blocks):
-                                if i % 2 == 1: # Math Chunk
-                                    with ui.element('div').classes('py-4 flex justify-center bg-purple-50/50 rounded-xl my-2 border border-purple-100'):
-                                        ui.katex(chunk.strip()).classes('text-lg text-purple-800')
-                                else: # Text/Markdown Chunk
-                                    if chunk.strip():
-                                        ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 leading-relaxed')
+                    with ui.element('div').classes('p-4'):
+                        # Handle Math Blocks: Use markdown but trigger re-render
+                        chunks = re.split(r'(\$\$.*?\$\$)', body, flags=re.DOTALL)
+                        for chunk in chunks:
+                            if chunk.strip():
+                                ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 leading-relaxed math-target')
+                
+                # Trigger KaTeX Re-render for dynamic content
+                ui.run_javascript('if(window.renderMathInElement) renderMathInElement(document.body);')
 
                 # Interactive Visualization Hook
                 if params:
