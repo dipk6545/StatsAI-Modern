@@ -1,35 +1,48 @@
 @echo off
 setlocal
 color 0B
-title StatsAI Analyst Hub - Unified Master
 
-echo ==================================================
-echo       StatsAI Analyst: Unified Command Center
-echo ==================================================
+:: --- CONFIGURATION VARIABLES ---
+set APP_TITLE=StatsAI Analyst Hub - Dual Engine
+set APP_HEADER=StatsAI Analyst: Production Laboratory
+set BACKEND_PORT=3001
+set FRONTEND_PORT=8080
+set BACKEND_SCRIPT=server/main.py
+set FRONTEND_SCRIPT=nicegui_app/main.py
+:: -------------------------------
+
+title %APP_TITLE%
+
+echo =========================================================
+echo       %APP_HEADER%
+echo =========================================================
 echo.
 
 :: 1. Cleanup
-echo [1/3] Terminating stale Python processes...
+echo [1/4] Terminating stale Python processes...
 taskkill /f /im python.exe /t >nul 2>&1
 
-:: 2. Boot Unified Server
-echo [2/3] Initializing Master Hub (UI + Cognitive Routing)...
-:: Launching from the server directory to ensure .env is correctly loaded
-start "StatsAI-Master" /min cmd /c "cd server && python main.py"
+:: 2. Boot Backend Headless API
+echo [2/4] Initializing Headless Cognitive API (Port %BACKEND_PORT%)...
+start "StatsAI-Backend" /min cmd /k "python %BACKEND_SCRIPT%"
 
-:: 3. Ready-state wait
-echo Waiting for server to initialize...
-ping 127.0.0.1 -n 8 >nul
+:: 3. Boot Frontend Client UI
+echo [3/4] Initializing NiceGUI Client Interface (Port %FRONTEND_PORT%)...
+start "StatsAI-Frontend" /min cmd /k "python %FRONTEND_SCRIPT%"
 
-:: 4. Launch Workspace
-echo [3/3] Opening your Workspace at http://localhost:3001
-start http://localhost:3001
+:: 4. Ready-state wait
+echo [4/4] Waiting for engines to sync...
+ping 127.0.0.1 -n 6 >nul
+
+:: Launch Web Browser
+start http://localhost:%FRONTEND_PORT%
 
 echo.
-echo ==================================================
-echo [SUCCESS] Your StatsAI environment is now LIVE!
-echo [ HELP  ] Use http://localhost:3001 to access the UI.
-echo ==================================================
+echo =========================================================
+echo [SUCCESS] Your StatsAI Dual-Engine Pipeline is LIVE!
+echo [ BACKEND ] Running actively on Port %BACKEND_PORT%.
+echo [ FRONTEND] Running actively on Port %FRONTEND_PORT%.
+echo =========================================================
 echo.
 
 pause
