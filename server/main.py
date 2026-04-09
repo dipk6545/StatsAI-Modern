@@ -55,7 +55,7 @@ def _build_prompt(domain: str, reason: bool, allow_chart: bool) -> str:
             f"STYLE RULES:\n"
             f" - Use Emojis and scannable Bullet Points.\n"
             f" - MANDATORY: Use double newlines \\n\\n between ALL sections to ensure structure.\n"
-            f" - MATHEMATICS: Use standard LaTeX wrapped in $$ (e.g., $$f(x)=\\frac{1}{x^2}$$) for all formulas.\n"
+            f" - MATHEMATICS: Use standard LaTeX wrapped in $$ (e.g., $$f(x)=\\frac{{1}}{{x^2}}$$) for all formulas.\n"
             f" - Format your explanation as follows:\n\n"
             f"   ### 📝 Summary\n"
             f"   [Eye-catching summary with emojis]\n\n"
