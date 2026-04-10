@@ -250,12 +250,9 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 .q-btn:before{box-shadow:none!important}
 .q-btn:active{background:transparent!important}
 .q-field__control,.q-field__native{background:transparent!important}
-.q-field--outlined .q-field__control:before{border:none!important}
-.q-field--outlined .q-field__control:after{display:none!important}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:99px}
-::-webkit-scrollbar-thumb:hover{background:#9ca3af}
 .app-shell{display:flex;width:100vw;height:100vh;overflow:hidden;background:#fff;position:fixed;top:0;left:0}
 .sidebar-left{width:clamp(175px,16vw,225px);flex-shrink:0;background:#f9fafb;display:flex;flex-direction:column;height:100%;overflow:hidden;border-right:1px solid #e5e7eb}
 .sidebar-right{width:225px;flex-shrink:0;background:#fff;display:flex;flex-direction:column;height:100%;overflow:hidden;border-left:1px solid #e5e7eb}
@@ -265,12 +262,8 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 .nav-item:not(.active){color:#6b7280}
 .nav-item:not(.active):hover{background:#f3f4f6}
 .recent-item{display:block;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s;width:100%;border:none;background:transparent;text-align:left}
-.recent-item:hover{background:#f3f4f6}
 .recent-item.cur{background:#ede9fe}
 .slabel{font-size:10px;font-weight:700;color:#9ca3af;letter-spacing:.08em;text-transform:uppercase;display:block}
-.action-bubble{display:inline-block;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:3px 9px;margin-right:2px;margin-bottom:4px;font-size:10px;color:#4b5563;font-weight:600;cursor:pointer;transition:all .15s cubic-bezier(.4,0,.2,1);box-shadow:0 1px 2px rgba(0,0,0,.03)}
-.action-bubble:hover{border-color:#7c3aed;background:#f5f3ff;color:#7c3aed;transform:translateY(-1px);box-shadow:0 3px 5px -1px rgba(124,58,237,.08)}
-.action-bubble:active{transform:scale(.96)}
 .send-btn{width:42px!important;height:42px!important;border-radius:12px!important;background:#7c3aed!important;border:none!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;flex-shrink:0!important;min-height:unset!important;padding:0!important;transition:all .15s cubic-bezier(.4,0,.2,1)!important}
 .send-btn:hover{background:#6d28d9!important;transform:translateY(-1px)}
 .send-btn:active{transform:scale(.91)!important}
@@ -283,12 +276,12 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 
     with ui.element('div').classes('app-shell'):
         with ui.element('div').classes('sidebar-left'):
-            with ui.element('div').style('display:flex;align-items:center;gap:10px;padding:15px 12px;border-bottom:1px solid #e5e7eb;'):
-                ui.html(f'<div style="width:30px;height:30px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;">{icon_chart("white")}</div>')
+            with ui.element('div').style('display:flex;align-items:center;gap:10px;padding:15px 12px;border-bottom:1px solid #e5e7eb;flex-shrink:0;'):
+                ui.html(f'<div style="width:30px;height:30px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{icon_chart("white")}</div>')
                 with ui.element('div'):
-                    ui.label(APP_TITLE).style('font-weight:700;font-size:13px;color:#111827;')
-                    ui.label(APP_SUBTITLE).style('font-size:9px;color:#9ca3af;font-weight:600;')
-            nav_wrap = ui.element('div').style('padding:11px 8px;')
+                    ui.label(APP_TITLE).style('font-weight:700;font-size:13px;color:#111827;line-height:1.2;display:block;')
+                    ui.label(APP_SUBTITLE).style('font-size:9px;color:#9ca3af;letter-spacing:.14em;font-weight:600;display:block;')
+            nav_wrap = ui.element('div').style('padding:11px 8px;flex-shrink:0;')
             @ui.refreshable
             def render_nav():
                 nav_wrap.clear()
@@ -297,27 +290,30 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                     for item in NAV_ITEMS:
                         active = item == s.nav
                         with ui.element('div').classes(f'nav-item{"  active" if active else ""}').on('click',lambda it=item: (setattr(s,'nav',it), render_nav.refresh())):
-                            ui.label(item)
+                            ui.label(item).style(f'font-size:12.5px;{"font-weight:600;" if active else ""}')
             render_nav()
-            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;')
+            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;flex-shrink:0;')
             with ui.element('div').style('padding:0px 12px;'):
                 with ui.element('div').classes('w-full relative flex p-1 bg-gray-200/50 rounded-full no-select overflow-hidden').style('user-select:none;height:auto;'):
                     pill = ui.element('div').style('position:absolute;top:2px;bottom:2px;left:2px;width:calc(50% - 2px);background:white;border-radius:999px;box-shadow:0 1px 3px rgba(0,0,0,.1);transition:transform .3s cubic-bezier(.4,0,.2,1);transform:translateX(0);pointer-events:none;')
                     def _tog(val):
                         s.multi = val
                         pill.style(f'transform:translateX({"calc(100% + 1px)" if val else "0"});')
-                        lbl1.classes(remove='text-purple-600 text-gray-500 font-bold font-medium text-[12px] text-[13px]')
-                        lbl1.classes(f'{"text-gray-500 font-medium text-[12px]" if val else "text-purple-600 font-bold text-[13px]"}')
-                        lbl2.classes(remove='text-purple-600 text-gray-500 font-bold font-medium text-[12px] text-[13px]')
-                        lbl2.classes(f'{"text-purple-600 font-bold text-[13px]" if val else "text-gray-500 font-medium text-[12px]"}')
+                        for l in [lbl1, lbl2]: l.classes(remove='text-purple-600 text-gray-500 font-bold font-medium text-[12px] text-[13px] scale-105 scale-95')
+                        if val:
+                            lbl1.classes('text-gray-500 font-medium text-[12px] scale-95 transition-transform duration-300')
+                            lbl2.classes('text-purple-600 font-bold text-[13px] scale-105 transition-transform duration-300')
+                        else:
+                            lbl1.classes('text-purple-600 font-bold text-[13px] scale-105 transition-transform duration-300')
+                            lbl2.classes('text-gray-500 font-medium text-[12px] scale-95 transition-transform duration-300')
                     
                     with ui.button(on_click=lambda:_tog(False)).classes('relative z-10 flex-1 h-full p-0 flex items-center justify-center').props('flat no-caps no-ripple'):
-                        lbl1 = ui.label(MODE_LEFT).classes('w-full text-center leading-none no-select text-purple-600 font-bold text-[13px] mt-[1.5px]')
+                        lbl1 = ui.label(MODE_LEFT).classes('w-full text-center leading-none no-select text-purple-600 font-bold text-[13px] mt-[1.5px] scale-105 transition-transform duration-300')
                     with ui.button(on_click=lambda:_tog(True)).classes('relative z-10 flex-1 h-full p-0 flex items-center justify-center').props('flat no-caps no-ripple'):
-                        lbl2 = ui.label(MODE_RIGHT).classes('w-full text-center leading-none no-select text-gray-500 font-medium text-[12px] mt-[1px]')
-            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;')
+                        lbl2 = ui.label(MODE_RIGHT).classes('w-full text-center leading-none no-select text-gray-500 font-medium text-[12px] mt-[1px] scale-95 transition-transform duration-300')
+            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;flex-shrink:0;')
             ui.label('RECENT').classes('slabel').style('padding:0 12px 6px;')
-            recents_wrap = ui.element('div').style('flex:1;overflow-y:auto;padding:0 6px;')
+            recents_wrap = ui.element('div').style('flex:1;min-height:0;overflow-y:auto;padding:0 6px;')
             @ui.refreshable
             def render_recents():
                 recents_wrap.clear()
@@ -325,73 +321,82 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                     for sid in SID_ORDER:
                         sess = SESSIONS.get(sid)
                         with ui.element('div').classes(f'recent-item{"  cur" if sid==s.cur_sid else ""}').on('click',lambda sv=sid: _load_session(sv)):
-                            ui.label(sess['title']).style('font-size:12px;font-weight:500;color:#374151;')
+                            ui.label(sess['title']).style('font-size:12px;font-weight:500;color:#374151;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;')
             render_recents(); refs['render_recents']=render_recents
 
         with ui.element('div').classes('chat-center'):
-            with ui.element('div').style('display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb;'):
-                ui.html(f'<div style="width:30px;height:30px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;">{icon_chart()}</div>')
-                ui.label('StatsAI Analyst').style('font-size:14px;font-weight:700;')
-            scroll = ui.scroll_area().style('flex:1;')
+            with ui.element('div').style('display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb;flex-shrink:0;background:#fff;'):
+                ui.html(f'<div style="width:30px;height:30px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-center;flex-shrink:0;">{icon_chart()}</div>')
+                ui.label('StatsAI Analyst').style('font-size:14px;font-weight:700;color:#111827;')
+            scroll = ui.scroll_area().style('flex:1;background:#fff;')
             refs['scroll'] = scroll
             with scroll:
                 mc = ui.element('div').style('display:flex;flex-direction:column;gap:18px;padding:18px;width:100%;')
                 refs['mc'] = mc
                 render_bot_block(WELCOME, mc)
-            with ui.element('div').style('padding:10px 14px 13px;border-top:1px solid #f3f4f6;'):
+            with ui.element('div').style('padding:10px 14px 13px;border-top:1px solid #f3f4f6;flex-shrink:0;background:#fff;'):
                 with ui.element('div').style('display:flex;align-items:center;gap:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:999px;padding:4px 5px 4px 16px;'):
-                    inp = ui.input(placeholder='Message StatsAI...').props('borderless dense').style('flex:1;font-size:13px;')
+                    inp = ui.input(placeholder='Message StatsAI...').props('borderless dense').style('flex:1;font-size:13px;color:#111827;')
                     refs['inp'] = inp
                     async def send_message():
                         val = inp.value.strip()
                         if not val or s.processing: return
                         inp.value = ''; s.processing = True
                         if not s.cur_sid:
-                            sid = _new_sid(); s.cur_sid=sid; SESSIONS[sid] = {'title': val[:30], 'date': _today(), 'messages': []}
+                            sid = _new_sid(); s.cur_sid=sid; SESSIONS[sid] = {'title': val[:40], 'date': _today(), 'messages': []}
                             SID_ORDER.insert(0, sid); render_recents.refresh()
                         mc_ref=refs['mc']; sa_ref=refs['scroll']; render_user_bubble(val, mc_ref); sa_ref.scroll_to(percent=1.0)
                         typing=render_typing(mc_ref); sa_ref.scroll_to(percent=1.0)
-                        
                         import requests as req
                         stack = S.models if S.models else ["Mistral Large"]
                         r = random.randint(0, 8); start = (r // len(stack)) % len(stack)
                         final_stack = stack[start:] + stack[:start]; success = False
                         for i, m_name in enumerate(final_stack):
                             try:
-                                s.model_name = f'Hitting {m_name}...'; refs['status_led'].classes('pulse-green', remove='bg-gray-300 bg-green-500 pulse-red'); refs['model_lbl'].text = s.model_name
+                                s.model_name = f'Hitting {m_name}...'
+                                try:
+                                    refs['status_led'].classes('pulse-green', remove='bg-gray-300 bg-green-500 pulse-red')
+                                    refs['model_lbl'].text = s.model_name
+                                except: pass
                                 payload = {'message': val, 'model_id': m_name, 'domain': s.subject.lower(), 'history': json.dumps([{'role':m['role'],'text':m['text']} for m in SESSIONS[s.cur_sid]['messages']])}
                                 res = await asyncio.get_event_loop().run_in_executor(None, lambda: req.post(API_URL, data=payload, timeout=API_TIMEOUT))
                                 if res.status_code == 200:
-                                    data = res.json(); reply = data.get('reply',''); s.model_name = m_name
-                                    refs['status_led'].classes('bg-green-500', remove='pulse-green pulse-red'); refs['model_lbl'].text = s.model_name
-                                    try: typing.delete()
+                                    reply = res.json().get('reply',''); s.model_name = m_name; s.status_cls='success'
+                                    try:
+                                        refs['status_led'].classes('bg-green-500', remove='pulse-green pulse-red')
+                                        refs['model_lbl'].text = s.model_name
+                                        typing.delete()
                                     except: pass
                                     render_bot_block(reply, mc_ref); SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':reply}])
                                     success = True; break
-                                else: raise Exception("API Error")
-                            except:
-                                s.model_name = f'Failover: {final_stack[i+1]}...' if i+1 < len(final_stack) else 'Offline'
-                                refs['status_led'].classes('pulse-red', remove='pulse-green'); refs['model_lbl'].text = s.model_name
-                                if i+1 < len(final_stack): await asyncio.sleep(1.5)
+                                else: raise Exception(f"HTTP {res.status_code}")
+                            except Exception as exc:
+                                next_m = final_stack[i+1] if i+1 < len(final_stack) else None
+                                s.model_name = f'Failover: {next_m}...' if next_m else 'Offline'
+                                try:
+                                    refs['status_led'].classes('pulse-red', remove='pulse-green')
+                                    refs['model_lbl'].text = s.model_name
+                                except: pass
+                                if next_m: await asyncio.sleep(1.5)
                         if not success:
                             try: typing.delete()
                             except: pass
-                            with mc_ref: ui.label('Critically Offline').style('color:red;font-size:12px;')
+                            with mc_ref: ui.label('Critically Offline').style('color:#ef4444;font-size:12px;font-style:italic;')
                         s.processing = False; sa_ref.scroll_to(percent=1.0)
                     inp.on('keydown.enter', send_message)
                     with ui.button(on_click=send_message).classes('send-btn').props('flat'):
                         ui.html(icon_send())
 
         with ui.element('div').classes('sidebar-right'):
-            with ui.scroll_area().style('flex:1;'):
+            with ui.scroll_area().style('flex:1;min-height:0;'):
                 with ui.element('div').style('padding:20px 10px;'):
-                    ui.label('MODEL STATUS').classes('slabel')
-                    with ui.element('div').classes('bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col gap-3 mt-3'):
+                    ui.label('MODEL STATUS').classes('slabel').style('margin-bottom:15px;')
+                    with ui.element('div').classes('bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col gap-3'):
                         with ui.element('div').classes('flex items-center gap-3'):
                             refs['status_led'] = ui.element('div').classes('w-2.5 h-2.5 rounded-full bg-gray-300')
-                            ui.label('ENGINE STATUS').classes('text-[10px] font-black text-gray-400')
-                        refs['model_lbl'] = ui.label('Ready').classes('text-[12px] font-black text-purple-700')
-            ui.label('StatsAI v2.5').classes('text-[10px] text-gray-300 font-bold text-center w-full block p-4')
+                            ui.label('ENGINE STATUS').classes('text-[10px] font-black text-gray-400 tracking-widest')
+                        refs['model_lbl'] = ui.label('Ready').classes('text-[12px] font-black text-purple-700 truncate')
+            ui.label('StatsAI v2.5').classes('text-[10px] text-gray-300 font-bold uppercase text-center w-full block p-4')
 
     def _load_session(sid):
         sess = SESSIONS.get(sid); s.cur_sid = sid; mc_ref = refs['mc']; mc_ref.clear()
@@ -401,7 +406,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 async def _startup_sync():
     import requests as req
     try:
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
         res = await asyncio.get_event_loop().run_in_executor(None, lambda: req.get('http://127.0.0.1:3001/api/config', timeout=5))
         if res.status_code == 200: S.models = res.json().get('models', ["Mistral Large"])
     except: pass
