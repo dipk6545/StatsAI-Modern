@@ -396,6 +396,10 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 @keyframes bdot{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-5px);opacity:1}}
 *{-webkit-tap-highlight-color:transparent!important}
 .no-select,.q-btn,.nav-item,.send-btn{user-select:none!important;outline:none!important;-webkit-user-select:none!important}
+.pulse-green{animation:pgreen 0.8s infinite alternate}
+@keyframes pgreen{from{background:#22c55e;box-shadow:0 0 2px #22c55e}to{background:#4ade80;box-shadow:0 0 10px #4ade80}}
+.pulse-red{animation:pred 0.5s infinite alternate}
+@keyframes pred{from{background:#ef4444}to{background:#fca5a5;box-shadow:0 0 8px #ef4444}}
 .q-focus-helper,.q-ripple,.q-btn__overlay{display:none!important;visibility:hidden!important;opacity:0!important}
 .q-btn:before{box-shadow:none!important}
 .q-btn:active{background:transparent!important}
@@ -444,9 +448,9 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
         subject    = 'Descriptive'
         processing = False
         multi      = False
+        status_cls = ''      # For LED signaling
+        model_name = 'Ready' # For model display
         cur_sid    = None
-        model_name = 'Ready'
-        status_cls = ''
     s = S()
     refs = {}
 
@@ -598,9 +602,12 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                             SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':fake_reply}])
                         else:
                             try:
-                                s.status_cls = 'led-green'
-                                s.model_name = 'Inference...'
-                                refs['render_status'].refresh()
+                                s.status_cls = 'active'
+                                s.model_name = 'Syncing Engines...'
+                                try:
+                                    refs['status_led'].classes('pulse-green', remove='bg-gray-300 bg-green-500 pulse-red')
+                                    refs['model_lbl'].text = s.model_name
+                                except: pass
                                 
                                 import requests as req
                                 payload = {
@@ -615,22 +622,35 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                                 if res.status_code == 200:
                                     data = res.json()
                                     reply = data.get('reply','')
-                                    s.model_name = data.get('model_used', 'Unknown Model')
-                                    s.status_cls = '' # stop blinking on success
+                                    s.status_cls = 'success'
+                                    s.model_name = data.get('model_used', 'Ready')
+                                    try:
+                                        refs['status_led'].classes('bg-green-500', remove='pulse-green pulse-red bg-gray-300')
+                                        refs['model_lbl'].text = s.model_name
+                                    except: pass
                                     render_bot_block(reply, mc_ref)
                                     SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':reply}])
                                 else:
-                                    s.status_cls = 'led-red'
+                                    s.status_cls = 'error'
                                     s.model_name = f'HTTP {res.status_code}'
+                                    try:
+                                        refs['status_led'].classes('pulse-red', remove='pulse-green bg-green-500 bg-gray-300')
+                                        refs['model_lbl'].text = s.model_name
+                                    except: pass
                                     with mc_ref: ui.label(f'API error {res.status_code}').style('color:#ef4444;font-size:12px;font-style:italic;')
                             except Exception as exc:
                                 try: typing.delete()
                                 except: pass
-                                s.status_cls = 'led-red'
+                                s.status_cls = 'error'
                                 s.model_name = 'Conn Error'
+                                try:
+                                    refs['status_led'].classes('pulse-red', remove='pulse-green bg-green-500 bg-gray-300')
+                                    refs['model_lbl'].text = s.model_name
+                                except: pass
                                 with mc_ref: ui.label(f'Connection error: {exc}').style('color:#ef4444;font-size:12px;font-style:italic;')
                             finally:
-                                pass
+                                try: refs['render_led'].refresh()
+                                except: pass
 
                         s.processing = False
                         sa_ref.scroll_to(percent=1.0)
@@ -642,23 +662,20 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
         # RIGHT SIDEBAR (Narrowed + Model Status)
         with ui.element('div').classes('sidebar-right'):
             with ui.scroll_area().style('flex:1;min-height:0;'):
-                with ui.element('div').style('padding:20px 15px;'):
+                with ui.element('div').style('padding:20px 10px; width: 100%;'):
                     ui.label('MODEL STATUS').classes('slabel').style('margin-bottom:15px;')
                     
-                    @ui.refreshable
-                    def render_status():
-                        with ui.element('div').classes('bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col gap-3'):
-                            with ui.element('div').classes('flex items-center gap-3'):
-                                # LED INDICATOR: Blinks during inference or shows error
-                                ui.element('div').classes(f'w-2.5 h-2.5 rounded-full {s.status_cls if s.status_cls else "bg-gray-300"}')
-                                ui.label('Engine Status').classes('text-[11px] font-bold text-gray-400 uppercase tracking-wider')
-                            
-                            # ACTIVE MODEL NAME
-                            m_lbl = ui.label('Ready').classes('text-[13px] font-black text-purple-700 truncate')
-                            m_lbl.bind_text_from(s, 'model_name')
-                            
-                    render_status()
-                    refs['render_status'] = render_status
+                    # PERMANENT STATUS CARD (STABILIZED & LOCKED)
+                    with ui.element('div').classes('bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col gap-3').style('width: 100%; margin: 0;'):
+                        with ui.element('div').classes('flex items-center gap-3'):
+                            # LED indicator (Manual Ref)
+                            led = ui.element('div').classes('w-2.5 h-2.5 rounded-full bg-gray-300')
+                            refs['status_led'] = led
+                            ui.label('ENGINE STATUS').classes('text-[10px] font-black text-gray-400 uppercase tracking-widest')
+                        
+                        # Model name label (Manual Ref)
+                        m_lbl = ui.label('Ready').classes('text-[12px] font-black text-purple-700 truncate tracking-tight')
+                        refs['model_lbl'] = m_lbl
             
             with ui.element('div').style('padding:15px; border-top:1px solid #f3f4f6;'):
                 ui.label('StatsAI v2.5').classes('text-[10px] text-gray-300 font-bold uppercase text-center w-full block')
