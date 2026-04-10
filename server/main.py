@@ -1,10 +1,9 @@
 """
-StatsAI Headless API: Refined Smart Sync Edition
-Added 'Casual Bypass' for greetings and Insight suppression.
+StatsAI Headless API: Single-Shot Endpoint
+The Frontend now handles the rotation loop for real-time status updates.
 """
 
-import asyncio, json, logging, os, re, random
-from typing import Optional, Tuple, List
+import asyncio, json, logging, os, re
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form
@@ -24,11 +23,12 @@ except ImportError:
         MIST_MODE = None
 
 # ── INITIALIZATION ────────────────────────────────────────────────────────────
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / '.env')
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / '.env')
 GROQ_KEY  = os.getenv("GROQ_API_KEY", "").strip()
 CERE_KEY  = os.getenv("CEREBRAS_API_KEY", "").strip()
 MIST_KEY  = os.getenv("MISTRAL_API_KEY", "").strip()
+ROOT = BASE_DIR.parent # For vault
 
 VAULT_DIR = ROOT / ".statsai_vault"
 VAULT_DIR.mkdir(exist_ok=True)
@@ -41,91 +41,83 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger("StatsAI_Core")
 app = FastAPI()
 
-# ── SMART LOGIC HELPERS ───────────────────────────────────────────────────────
-GREETINGS = ['hi', 'hello', 'hey', 'sup', 'yo', 'greetings']
+# ── LOGIC HELPERS ─────────────────────────────────────────────────────────────
+def _get_system_prompt(domain: str, categories: str = "") -> str:
+    cat_hint = f"\nCreative categories: {categories}" if categories else ""
+    return (f"You are a Doctoral Statistical Researcher in {domain.upper()}.\n"
+            f"MATH: Wrap formulas in ($$...$$).\n"
+            f"VISUALS: Include <chart_params>{{...}}</chart_params> ONLY if 'chart/graph/plot/table' is in prompt."
+            f"{cat_hint}")
 
-def _is_casual(msg: str) -> bool:
-    m = msg.lower().strip().strip('?!.')
-    return m in GREETINGS or len(m) < 4
-
-def _get_temp(msg: str) -> float:
-    if any(k in msg.lower() for k in ['solve','calculate','derive','formula','mean','median']):
-        return 0.1
-    return 0.5
-
-def _should_visualize(msg: str) -> bool:
-    return any(k in msg.lower() for k in ['plot','chart','graph','table','pie','bar','box','histogram','scatter'])
-
-async def provider_inference(name, client, model, messages, temp=0.5):
-    try:
-        if "Mistral" in name:
-            if MIST_MODE == "V2":
-                resp = await asyncio.to_thread(client.chat.complete, model=model, messages=messages, temperature=temp)
-            else:
-                resp = await asyncio.to_thread(client.chat, model=model, messages=messages, temperature=temp)
-            return resp.choices[0].message.content
-        else:
-            resp = await asyncio.to_thread(client.chat.completions.create, model=model, messages=messages, temperature=temp)
-            return resp.choices[0].message.content
-    except:
-        return None
+def _sanitize(text: str) -> str:
+    text = re.sub(r'<chart_params>.*?</chart_params>', '', text, flags=re.DOTALL)
+    for a in ['```json','```python','```html','```']: text = text.replace(a,'')
+    return text.strip()
 
 # ── ENDPOINTS ─────────────────────────────────────────────────────────────────
+@app.get("/api/config")
+async def api_config():
+    available = []
+    # Check specific loaded keys
+    if GROQ_KEY:  available.append("Groq Llama 3.3")
+    if MIST_KEY:  available.append("Mistral Large")
+    if CERE_KEY:  available.append("Cerebras Llama")
+    logger.info(f"Available Engines: {available}")
+    return {"models": available}
+
 @app.post("/api/chat")
 async def api_chat(
     message:  str = Form(...),
-    mode:     str = Form("single"),
+    model_id: str = Form(...), # Explicit model requested by frontend
     domain:   str = Form("statistics"),
-    history:  str = Form("[]"),
+    history:  str = Form("[]")
 ):
-    # 1. Define Model Pool & Probabilistic Entry
-    available = []
-    if GROQ_KEY: available.append(("Groq Llama 3.3", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile"))
-    if MIST_KEY and MISTRAL_MODE:
-        m_c = Mistral(api_key=MIST_KEY) if MIST_MODE == "V2" else MistralClient(api_key=MIST_KEY)
-        available.append(("Mistral Large", m_c, "mistral-large-latest"))
-    if CERE_KEY: available.append(("Cerebras Llama", Cerebras(api_key=CERE_KEY), "llama3.1-8b"))
+    # 1. Casual Greeting Detection (Persona Suppression)
+    is_casual = re.match(r'^(hi|hello|hey|greetings|hola)\s*[\!\?\. ]*$', message, re.I)
     
-    if not available: return {"reply": "ERROR: Keys missing.", "model_used": "NONE"}
+    # 2. Resolve Provider
+    client = None; actual_model = ""
+    if "Groq" in model_id:
+        client = Groq(api_key=GROQ_KEY); actual_model = "llama-3.3-70b-versatile"
+    elif "Mistral" in model_id:
+        client = Mistral(api_key=MIST_KEY) if MIST_MODE == "V2" else MistralClient(api_key=MIST_KEY)
+        actual_model = "mistral-large-latest"
+    elif "Cerebras" in model_id:
+        client = Cerebras(api_key=CERE_KEY); actual_model = "llama3.1-8b"
     
-    r = random.randint(0, 8); start_idx = (r // 3) % len(available)
-    stack = available[start_idx:] + available[:start_idx]
-    primary = stack[0]; secondary = stack[1] if len(stack) > 1 else stack[0]
+    if not client: return {"error": "Key Missing"}, 401
+
+    # 3. Construction
+    sys_prompt = _get_system_prompt(domain)
+    if is_casual:
+        sys_prompt = "You are StatsAI, a helpful statistical assistant. Respond to this greeting briefly and naturally. Do not include math or technical jargon unless invited."
     
-    is_c = _is_casual(message)
-    temp = _get_temp(message)
-    vis  = _should_visualize(message)
-    
-    # 2. PHASE 1: Main Inference
-    sys_p = (f"You are a Doctoral Statistical Researcher.\n"
-             f"STYLE: {'Casual and friendly' if is_c else 'Highly technical and academic'}.\n"
-             f"VISUALS: {'Include <chart_params>{...}</chart_params>' if vis else 'DO NOT include charts.'}")
-    
-    msgs = [{"role": "system", "content": sys_p}]
+    msgs = [{"role": "system", "content": sys_prompt}]
     try:
         hist = json.loads(history)
-        for h in hist[-4:]: msgs.append({"role": "assistant" if h.get('role') == 'bot' else "user", "content": h.get('text', '')})
+        for h in hist[-6:]: msgs.append({"role": "assistant" if h.get('role') == 'bot' else "user", "content": h.get('text', '')})
     except: pass
     msgs.append({"role": "user", "content": message})
 
-    main_reply = await provider_inference(primary[0], primary[1], primary[2], msgs, temp=temp)
-    if not main_reply: return {"reply": "ERROR: Inference Failed.", "model_used": "ERROR"}
-
-    # 3. PHASE 2: (Bypass for Casual Chat)
-    full_output = main_reply
-    if not is_c:
-        expl_msgs = [
-            {"role": "system", "content": "Provide a 2-sentence intuitive explanation of the technical answer below. NO MATH."},
-            {"role": "user", "content": f"Answer: {main_reply}\n\nExplain this simply:"}
-        ]
-        explanation = await provider_inference(secondary[0], secondary[1], secondary[2], expl_msgs, temp=0.4)
-        if explanation:
-            tag_match = re.search(r'<chart_params>.*?</chart_params>', main_reply, flags=re.DOTALL)
-            tag = tag_match.group(0) if tag_match else ""
-            clean_main = re.sub(r'<chart_params>.*?</chart_params>', '', main_reply, flags=re.DOTALL).strip()
-            full_output = f"{clean_main}\n\n**Analyst Insight:**\n{explanation}\n\n{tag}"
-    
-    return {"reply": full_output, "model_used": f"{primary[0]}{' + Insight' if not is_c else ''}"}
+    # 3. Execution
+    try:
+        logger.info(f"Targeting {model_id}...")
+        if "Mistral" in model_id:
+            if MIST_MODE == "V2":
+                resp = await asyncio.to_thread(client.chat.complete, model=actual_model, messages=msgs)
+            else:
+                resp = await asyncio.to_thread(client.chat, model=actual_model, messages=msgs)
+            full_reply = resp.choices[0].message.content
+        else:
+            resp = await asyncio.to_thread(client.chat.completions.create, model=actual_model, messages=msgs)
+            full_reply = resp.choices[0].message.content
+        
+        match = re.search(r'<chart_params>.*?</chart_params>', full_reply, flags=re.DOTALL)
+        tag = match.group(0) if match else ""
+        return {"reply": f"{_sanitize(full_reply)}\n\n{tag}"}
+    except Exception as e:
+        logger.error(f"Provider Error: {e}")
+        return {"error": str(e)}, 500
 
 if __name__ in {"__main__", "__mp_main__"}:
     uvicorn.run(app, host="127.0.0.1", port=3001)

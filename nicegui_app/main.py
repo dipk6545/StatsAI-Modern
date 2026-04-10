@@ -3,7 +3,7 @@ StatsAI Frontend UI Layer
 Based on the Unified Architecture, but specifically running purely as the NiceGUI Client.
 """
 
-import asyncio, json, re, logging
+import asyncio, json, re, logging, random
 from datetime import datetime
 from pathlib import Path
 from nicegui import ui, app
@@ -65,219 +65,99 @@ def _line(x, y, name=''):
 def build_figure(params: dict) -> go.Figure:
     N = 300
     dist = str(params.get('dist', 'normal')).lower().replace('-','').replace(' ','')
-    # No random seed - allows natural dynamic variance!
-    logger.info(f"Generating data for {dist}. Random check: {np.random.rand()}")
-
     if dist in ('normal','gaussian','bell','normalplot','normaldist'):
         mu, sig = params.get('mu', np.random.randint(-5, 6)), params.get('sigma', round(np.random.uniform(0.5, 3.0), 1))
         x = np.linspace(mu-4*sig, mu+4*sig, N)
         fig = go.Figure(_line(x, sp.norm.pdf(x,mu,sig), f'N({mu},{sig})'))
-        
-        # Add a stochastic 'rug' noise scatter to visually prove dynamic generation
         rug_x = np.random.normal(mu, sig, 80)
         rug_y = np.random.uniform(-0.02, 0.02, 80)
         fig.add_trace(go.Scatter(x=rug_x, y=rug_y, mode='markers', name='Sample Data', marker=dict(color='#8b5cf6', size=4, opacity=0.7), showlegend=True))
-        
         for s, alpha in ((1,0.25),(2,0.12)):
             xs = x[(x>=mu-s*sig)&(x<=mu+s*sig)]
             fig.add_trace(go.Scatter(x=np.concatenate([[xs[0]],xs,[xs[-1]]]), y=np.concatenate([[0],sp.norm.pdf(xs,mu,sig),[0]]), fill='toself', mode='none', fillcolor=f'rgba(124,58,237,{alpha})', showlegend=False))
         fig.update_layout(**_base_layout(title=dict(text=f'Normal Distribution  μ={mu}  σ={sig}', font_size=13), xaxis_title='z', yaxis_title='Density'))
-
     elif dist in ('t','tdist','tdistplot','studentt'):
         df = params.get('df', np.random.randint(2, 30))
         x  = np.linspace(-5,5,N)
         fig = go.Figure([_line(x, sp.t.pdf(x,df), f't (df={df})'), go.Scatter(x=x, y=sp.norm.pdf(x), mode='lines', name='Normal', line=dict(color='#9ca3af', width=1.5, dash='dot'), showlegend=True)])
         fig.update_layout(**_base_layout(showlegend=True, title=dict(text=f't-Distribution  df={df}', font_size=13), xaxis_title='t', yaxis_title='Density'))
-
     elif dist in ('f','fdist','fdistplot'):
         d1,d2 = params.get('df1', np.random.randint(2, 15)), params.get('df2', np.random.randint(10, 40))
         x = np.linspace(0.01,6,N)
         fig = go.Figure(_line(x, sp.f.pdf(x,d1,d2), f'F({d1},{d2})'))
         fig.update_layout(**_base_layout(title=dict(text=f'F-Distribution  df1={d1}  df2={d2}', font_size=13), xaxis_title='F', yaxis_title='Density'))
-
     elif dist in ('chi2','chisquare','chisq','chi'):
         df = params.get('df', np.random.randint(2, 15))
         x  = np.linspace(0.01, max(df*3,10), N)
         fig = go.Figure(_line(x, sp.chi2.pdf(x,df), f'χ²(df={df})'))
         fig.update_layout(**_base_layout(title=dict(text=f'Chi-Square  df={df}', font_size=13), xaxis_title='χ²', yaxis_title='Density'))
-
     elif dist in ('exponential','exp'):
         lam = params.get('lambda', round(np.random.uniform(0.5, 2.5), 1))
         x   = np.linspace(0, 6/lam, N)
         fig = go.Figure(_line(x, sp.expon.pdf(x,scale=1/lam), f'Exp(λ={lam})'))
         fig.update_layout(**_base_layout(title=dict(text=f'Exponential  λ={lam}', font_size=13), xaxis_title='x', yaxis_title='Density'))
-
     elif dist in ('lognormal','lognorm'):
         mu,sig = params.get('mu', round(np.random.uniform(-1, 1), 1)), params.get('sigma', round(np.random.uniform(0.2, 0.8), 2))
         x = np.linspace(0.001, np.exp(mu+4*sig), N)
         fig = go.Figure(_line(x, sp.lognorm.pdf(x,s=sig,scale=np.exp(mu))))
         fig.update_layout(**_base_layout(title=dict(text=f'Log-Normal  μ={mu}  σ={sig}', font_size=13), xaxis_title='x', yaxis_title='Density'))
-
-    elif dist == 'beta':
-        a,b = params.get('alpha', np.random.randint(2, 8)), params.get('beta', np.random.randint(2, 8))
-        x   = np.linspace(0,1,N)
-        fig = go.Figure(_line(x, sp.beta.pdf(x,a,b)))
-        fig.update_layout(**_base_layout(title=dict(text=f'Beta  α={a}  β={b}', font_size=13), xaxis_title='x', yaxis_title='Density'))
-
-    elif dist == 'gamma':
-        k,th = params.get('k', round(np.random.uniform(1.5, 4.0), 1)), params.get('theta', round(np.random.uniform(1.0, 3.0), 1))
-        x    = np.linspace(0, k*th*4, N)
-        fig  = go.Figure(_line(x, sp.gamma.pdf(x,a=k,scale=th)))
-        fig.update_layout(**_base_layout(title=dict(text=f'Gamma  k={k}  θ={th}', font_size=13), xaxis_title='x', yaxis_title='Density'))
-
-    elif dist == 'uniform':
-        a = params.get('a', np.random.randint(-5, 0))
-        b = params.get('b', np.random.randint(1, 5))
-        x   = np.linspace(a-0.5, b+0.5, N)
-        fig = go.Figure(go.Scatter(x=x, y=sp.uniform.pdf(x,loc=a,scale=b-a), mode='lines', line=dict(color=BRAND, width=2.5)))
-        fig.update_layout(**_base_layout(title=dict(text=f'Uniform [{a},{b}]', font_size=13), xaxis_title='x', yaxis_title='Density'))
-
-    elif dist in ('z','zcurve','zscore','zplot'):
-        z   = params.get('z', round(np.random.uniform(1.0, 3.0), 2))
-        x   = np.linspace(-4,4,N)
-        y   = sp.norm.pdf(x)
-        xs  = x[x>=z]
-        p   = round(1-sp.norm.cdf(z),4)
-        fig = go.Figure([go.Scatter(x=x, y=y, mode='lines', fill='tozeroy', fillcolor=BRAND_FILL, line=dict(color=BRAND,width=2.5), name='N(0,1)'), go.Scatter(x=np.r_[xs[0],xs,xs[-1]], y=np.r_[0,sp.norm.pdf(xs),0], fill='toself', mode='none', fillcolor='rgba(239,68,68,0.22)', name=f'p={p}')])
-        fig.update_layout(**_base_layout(showlegend=True, title=dict(text=f'Z-Curve  z={z}  p={p}', font_size=13), xaxis_title='z', yaxis_title='Density'))
-
-    elif dist == 'poisson':
-        lam   = params.get('lambda', np.random.randint(2, 12))
-        k     = np.arange(0, max(int(lam*3),15)+1)
-        fig   = go.Figure(go.Bar(x=k, y=sp.poisson.pmf(k,lam), marker_color=BRAND, marker_line_color='white', marker_line_width=1.5))
-        fig.update_layout(**_base_layout(title=dict(text=f'Poisson  λ={lam}', font_size=13), xaxis_title='k', yaxis_title='P(X=k)', bargap=0.2))
-
-    elif dist in ('binomial','binom'):
-        n,p = params.get('n', np.random.randint(10, 40)), params.get('p', round(np.random.uniform(0.2, 0.8), 2))
-        k   = np.arange(0,n+1)
-        fig = go.Figure(go.Bar(x=k, y=sp.binom.pmf(k,n,p), marker_color=BRAND, marker_line_color='white', marker_line_width=1.5))
-        fig.update_layout(**_base_layout(title=dict(text=f'Binomial  n={n}  p={p}', font_size=13), xaxis_title='k', yaxis_title='P(X=k)', bargap=0.2))
-
     elif dist in ('scatter','scatterplot'):
         n,corr = params.get('n', np.random.randint(60, 120)), params.get('corr', round(np.random.uniform(-0.9, 0.9), 2))
         x = np.random.randn(n)
         y = corr*x + np.sqrt(1-corr**2)*np.random.randn(n)
         fig = go.Figure(go.Scatter(x=x, y=y, mode='markers', marker=dict(color=BRAND,size=7,opacity=0.7, line=dict(color='white',width=1))))
         fig.update_layout(**_base_layout(title=dict(text=f'Scatter  ρ≈{corr}', font_size=13), xaxis_title='X', yaxis_title='Y'))
-
     elif dist in ('box','boxplot'):
         groups = params.get('groups', [f'Group {i+1}' for i in range(np.random.randint(2, 6))])
         traces = [go.Box(y=np.random.normal(i*2,1,50), name=g, marker_color=BRAND, line_color=BRAND, fillcolor=BRAND_FILL) for i,g in enumerate(groups)]
         fig = go.Figure(traces)
         fig.update_layout(**_base_layout(showlegend=False, title=dict(text='Box Plot', font_size=13), yaxis_title='Value'))
-
-    elif dist in ('violin','violinplot'):
-        groups = params.get('groups', [f'Set {i+1}' for i in range(np.random.randint(2, 5))])
-        traces = [go.Violin(y=np.random.normal(i,1,80), name=g, fillcolor=BRAND_FILL, line_color=BRAND, box_visible=True, meanline_visible=True) for i,g in enumerate(groups)]
-        fig = go.Figure(traces)
-        fig.update_layout(**_base_layout(showlegend=False, title=dict(text='Violin Plot', font_size=13), yaxis_title='Value'))
-
-    elif dist in ('histogram','hist'):
-        mu,sig = params.get('mu', np.random.randint(-10, 10)), params.get('sigma', round(np.random.uniform(0.5, 5.0), 1))
-        data   = np.random.normal(mu,sig,params.get('n',300))
-        xp     = np.linspace(data.min(),data.max(),200)
-        fig    = go.Figure([go.Histogram(x=data, nbinsx=30, histnorm='probability density', marker=dict(color=BRAND,line=dict(color='white',width=0.5)), name='Histogram'), go.Scatter(x=xp, y=sp.norm.pdf(xp,mu,sig), mode='lines', line=dict(color='#374151',width=1.5,dash='dot'), name='PDF')])
-        fig.update_layout(**_base_layout(showlegend=True, title=dict(text=f'Histogram  μ={mu}  σ={sig}', font_size=13), xaxis_title='x', yaxis_title='Density'))
-
-    elif dist in ('regression','regplot','regressionplot'):
-        n       = params.get('n',60)
-        x       = np.linspace(0,10,n)
-        y       = params.get('slope', round(np.random.uniform(-2, 3), 1))*x + params.get('intercept', np.random.randint(-5, 5)) + np.random.randn(n)*2
-        m,b,r,*_= sp.linregress(x,y)
-        fig     = go.Figure([go.Scatter(x=x, y=y, mode='markers', marker=dict(color=BRAND,size=7,opacity=0.65, line=dict(color='white',width=1))), go.Scatter(x=x, y=m*x+b, mode='lines', line=dict(color='#dc2626',width=2), name=f'y={m:.2f}x+{b:.2f}  r²={r**2:.3f}')])
-        fig.update_layout(**_base_layout(showlegend=True, title=dict(text=f'Regression  r²={r**2:.3f}', font_size=13), xaxis_title='X', yaxis_title='Y'))
-
     elif dist in ('heatmap','heatmapgrid'):
         n    = params.get('n', np.random.randint(6, 12))
         data = np.random.rand(n,n)
         labs = [f'Axis-{i+1}' for i in range(n)]
         fig  = go.Figure(go.Heatmap(z=data, x=labs, y=labs, colorscale=[[0,'#f5f3ff'],[0.5,BRAND],[1,'#3b0764']]))
         fig.update_layout(**_base_layout(title=dict(text=f'Heatmap {n}x{n}', font_size=13)))
-
-    elif dist in ('anova','anovaplot'):
-        groups = params.get('groups', [f'G{i+1}' for i in range(np.random.randint(3, 7))])
-        colors = ['#7c3aed','#a78bfa','#6d28d9','#c4b5fd']
-        traces = [go.Box(y=np.random.normal(i*1.5,1,30), name=g, marker_color=colors[i%4], boxmean=True) for i,g in enumerate(groups)]
-        fig = go.Figure(traces)
-        fig.update_layout(**_base_layout(showlegend=False, title=dict(text='ANOVA Group Comparison', font_size=13), yaxis_title='Value'))
-
-    elif dist in ('pareto','paretochart'):
-        count = np.random.randint(5, 9)
-        cats = params.get('categories', [f'Item-{chr(i+65)}' for i in range(count)])
-        vals = np.sort(np.random.randint(10,100,len(cats)))[::-1].tolist()
-        cum  = (np.cumsum(vals)/sum(vals)*100).tolist()
-        fig  = go.Figure([go.Bar(x=cats, y=vals, marker_color=BRAND, name='Count'), go.Scatter(x=cats, y=cum, yaxis='y2', mode='lines+markers', line=dict(color='#dc2626',width=2), name='Cumulative %')])
-        fig.update_layout(**_base_layout(showlegend=True, title=dict(text='Pareto Analysis', font_size=13), yaxis_title='Count', yaxis2=dict(title='Cumulative %', overlaying='y', side='right', range=[0,110], showgrid=False, ticksuffix='%')))
-
-    elif dist in ('waterfall','waterfallplot'):
-        count = np.random.randint(4, 8)
-        cats = params.get('categories', ['Start'] + [f'Q{i+1}' for i in range(count-2)] + ['End'])
-        vals = params.get('values', [np.random.randint(500, 1500)] + np.random.randint(-300, 400, count-2).tolist() + [0])
-        measure = ['absolute']+['relative']*(len(vals)-2)+['total']
-        fig = go.Figure(go.Waterfall(x=cats, y=vals, measure=measure, increasing_marker_color=BRAND, decreasing_marker_color='#dc2626', totals_marker_color='#374151', connector_line_color='#e5e7eb'))
-        fig.update_layout(**_base_layout(title=dict(text='Waterfall Chart', font_size=13), yaxis_title='Value'))
-
     elif dist in ('pie','piebreakout','piechart'):
         count = np.random.randint(4, 8)
         labels = params.get('labels', [f"Segment-{i+1}" for i in range(count)])
-        # FORCE randomization of values every time
         values = np.random.randint(5, 100, len(labels)).tolist()
         colors = ['#7c3aed','#a78bfa','#6d28d9','#6366f1','#8b5cf6','#c4b5fd','#ddd6fe']
         fig    = go.Figure(go.Pie(labels=labels, values=values, hole=0.35, marker=dict(colors=colors[:len(labels)], line=dict(color='white',width=2))))
         fig.update_layout(**_base_layout(title=dict(text='Distribution Breakout', font_size=13)))
-
     elif dist in ('trend','trendchart','line'):
         n   = params.get('n',24)
         y   = np.cumsum(np.random.randn(n))+10
         fig = go.Figure(go.Scatter(x=list(range(n)), y=y, mode='lines+markers', fill='tozeroy', fillcolor=BRAND_FILL, line=dict(color=BRAND,width=2.5), marker=dict(color=BRAND,size=5)))
         fig.update_layout(**_base_layout(title=dict(text='Trend Chart', font_size=13), xaxis_title='Period', yaxis_title='Value'))
-
     else:
         x = np.linspace(-4,4,N)
         fig = go.Figure(_line(x, sp.norm.pdf(x), 'N(0,1)'))
         fig.update_layout(**_base_layout(title=dict(text='Standard Normal Distribution', font_size=13), xaxis_title='z', yaxis_title='Density'))
-
     return fig
 
-# ── UI CONSTANTS ───────────────────────────────────────────────────────────────
-MODE_LEFT   = 'Single'
-MODE_RIGHT  = 'Multi'
-APP_TITLE   = 'StatsAI'
-APP_SUBTITLE= 'ANALYST'
-BOT_LABEL   = 'STATSAI ANALYST'
-USER_LETTER = 'S'
-API_URL     = 'http://127.0.0.1:3001/api/chat'
-API_TIMEOUT = 90
-
-CHIPS = list(CHIP_PARAMS.keys())
-NAV_ITEMS = ['Chat','Reports','Datasets','Gallery']
-
-PIPELINE_STEPS = [
-    'Agent Initialized','Mode Detection','Model Selected',
-    'Groq LPU Request','Params Extracted','Chart Generated',
-    'UI Rendered','Response Out',
-]
-WELCOME = "Hello! I'm StatsAI — your statistical research assistant. Click a quick action chip or type a question to get started."
-
 # ── SESSION STORE ──────────────────────────────────────────────────────────────
-SESSIONS: dict = {}
-SID_ORDER: list = []
+class S:
+    nav='Chat'; subject='Descriptive'; processing=False; multi=False; status_cls=''; model_name='Ready'; cur_sid=None; models=["Mistral Large"]
+
+SESSIONS: dict = {}; SID_ORDER: list = []
+
+# ── UI CONSTANTS ───────────────────────────────────────────────────────────────
+MODE_LEFT   = 'Single'; MODE_RIGHT  = 'Multi'; APP_TITLE   = 'StatsAI'; APP_SUBTITLE= 'ANALYST'
+BOT_LABEL   = 'STATSAI ANALYST'; USER_LETTER = 'S'; API_URL     = 'http://127.0.0.1:3001/api/chat'; API_TIMEOUT = 90
+CHIPS = list(CHIP_PARAMS.keys()); NAV_ITEMS = ['Chat','Reports','Datasets','Gallery']
+WELCOME = "Hello! I'm StatsAI — your statistical research assistant. Click a quick action chip or type a question to get started."
 
 def _new_sid():
     import uuid; return str(uuid.uuid4())[:8]
-
 def _today():
     return datetime.now().strftime('%b %d')
 
-# ── SVG ICONS ──────────────────────────────────────────────────────────────────
 def icon_chart(color='#7c3aed'):
     return f'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 12l4-4 3 3 5-7" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-def icon_check():
-    return '<svg width="7" height="7" viewBox="0 0 7 7" fill="none"><path d="M1.5 3.5l1.5 1.5 2.5-3" stroke="white" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 def icon_send():
     return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22 11 13 2 9l20-7z" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
-# ── RENDER HELPERS ─────────────────────────────────────────────────────────────
 _EXPL_RE   = re.compile(r'<explanation>(.*?)</explanation>', re.DOTALL|re.IGNORECASE)
 _PARAMS_RE = re.compile(r'<chart_params>(.*?)</chart_params>', re.DOTALL|re.IGNORECASE)
 
@@ -285,71 +165,48 @@ def _parse_params(text: str) -> dict | None:
     m = _PARAMS_RE.search(text)
     if not m: return None
     raw = m.group(1).strip()
-    for attempt in (raw, re.sub(r',\s*([}\]])', r'\1', raw)):
-        try: return json.loads(attempt)
-        except: pass
-    return None
+    try: return json.loads(raw)
+    except: return None
 
 def render_bot_block(raw_text: str, container):
-    # Regex for section extraction
-    sections = re.split(r'##\s*(.*?)\n', raw_text)
-    # sections[0] is intro, [1]=Header1, [2]=Content1, [3]=Header2, [4]=Content2...
-    
     params = _parse_params(raw_text)
     expl_m = _EXPL_RE.search(raw_text)
     content = expl_m.group(1).strip() if expl_m else raw_text
-
     with container:
         with ui.element('div').classes('flex gap-3 items-start w-full mb-6'):
-            # Bot Avatar
             with ui.element('div').classes('flex-shrink-0 mt-1'):
                 ui.html(f'<div style="width:34px;height:34px;background:linear-gradient(135deg, #7c3aed, #4f46e5);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(124,58,237,0.2);">{icon_chart("white")}</div>')
-            
             with ui.element('div').classes('flex flex-col gap-1.5 flex-1 min-w-0'):
-                # Bot Header
                 with ui.element('div').classes('flex items-center gap-2'):
                     ui.label(BOT_LABEL).classes('text-[11px] text-purple-600 font-black uppercase tracking-[0.2em]')
                     ui.element('div').classes('h-[1px] flex-1 bg-gradient-to-r from-purple-100 to-transparent')
-
-                # Sectioned Card Engine
                 parts = re.split(r'##\s*', content)
                 for part in parts:
                     if not part.strip(): continue
                     lines = part.strip().split('\n', 1)
-                    title = lines[0].strip()
-                    body  = lines[1].strip() if len(lines) > 1 else ""
-
-                    with ui.element('div').classes('bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow duration-300'):
-                        # Card Header
-                        with ui.element('div').classes('bg-gray-50/50 px-4 py-2.5 border-b border-gray-50 flex items-center justify-between'):
-                            ui.label(title).classes('text-[13px] font-bold text-gray-700 flex items-center gap-2')
-                        
-                    with ui.element('div').classes('p-4'):
-                        # Handle Math Blocks: Use markdown but trigger re-render
-                        chunks = re.split(r'(\$\$.*?\$\$)', body, flags=re.DOTALL)
-                        for chunk in chunks:
-                            if not chunk.strip(): continue
-                            # If it's a display math block, enlarge it
-                            if chunk.startswith('$$'):
-                                with ui.element('div').classes('py-6 flex justify-center bg-purple-50/30 rounded-xl my-4 border border-purple-100/50'):
-                                    ui.markdown(chunk.strip()).classes('text-2xl text-purple-900 math-target')
-                            else:
-                                ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 leading-relaxed math-target')
-                
-                # Trigger KaTeX Re-render for dynamic content
-                ui.run_javascript('if(window.renderMathInElement) renderMathInElement(document.body, {delimiters: [{left: "$$", right: "$$", display: true}, {left: "$", right: "$", display: false}, {left: "\\\\(", right: "\\\\)", display: false}]});')
-
-                # Interactive Visualization Hook
+                    title = lines[0].strip(); body  = lines[1].strip() if len(lines) > 1 else ""
+                    with ui.element('div').classes('bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden mb-3'):
+                        with ui.element('div').classes('bg-gray-50/50 px-4 py-2 border-b border-gray-50'):
+                            ui.label(title).classes('text-[13px] font-bold text-gray-700')
+                        with ui.element('div').classes('p-4'):
+                            chunks = re.split(r'(\$\$.*?\$\$)', body, flags=re.DOTALL)
+                            for chunk in chunks:
+                                if not chunk.strip(): continue
+                                if chunk.startswith('$$'):
+                                    with ui.element('div').classes('py-4 flex justify-center bg-purple-50/30 rounded-xl my-2'):
+                                        ui.markdown(chunk.strip()).classes('text-lg text-purple-900 math-target')
+                                else:
+                                    ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 math-target')
+                ui.run_javascript('if(window.renderMathInElement) renderMathInElement(document.body, {delimiters: [{left: "$$", right: "$$", display: true}, {left: "$", right: "$", display: false}]});')
                 if params:
                     try:
                         fig = build_figure(params)
-                        with ui.element('div').classes('rounded-2xl overflow-hidden border border-purple-100 shadow-lg'):
+                        with ui.element('div').classes('rounded-2xl overflow-hidden border border-purple-100 shadow-lg mt-2'):
                             with ui.element('div').classes('bg-purple-600 px-4 py-2 flex items-center justify-between'):
                                 ui.label('LIVE ANALYTICAL PROJECTION').classes('text-[10px] text-white font-bold tracking-widest')
-                                ui.label('INTERACTIVE').classes('text-[9px] bg-white/20 px-2 py-0.5 rounded text-white font-bold')
-                            ui.plotly(fig.to_dict()).classes('w-full').style('height:380px;background:white;')
+                            ui.plotly(fig.to_dict()).classes('w-full').style('height:350px;background:white;')
                     except Exception as e:
-                        ui.label(f'DYNAMICS ERROR: {e}').classes('text-red-400 text-[10px] italic p-4 bg-red-50 rounded-xl')
+                        ui.label(f'DYNAMICS ERROR: {e}').classes('text-red-400 text-[10px] p-4 bg-red-50 rounded-xl')
 
 def render_user_bubble(text: str, container):
     with container:
@@ -368,24 +225,13 @@ def render_typing(container):
                     ui.element('div').classes(cls).style(f'width:7px;height:7px;border-radius:50%;background:{bg};')
     return el
 
-# ── MAIN PAGE ──────────────────────────────────────────────────────────────────
 @ui.page('/')
 async def main_page():
     ui.add_head_html('<link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet"/>')
     ui.add_head_html('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css">')
     ui.add_head_html('<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js"></script>')
     ui.add_head_html('<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/auto-render.min.js"></script>')
-    ui.add_head_html("""
-        <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const r = () => window.renderMathInElement && renderMathInElement(document.body, {
-                delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],
-                throwOnError: false
-            });
-            new MutationObserver(r).observe(document.body, {childList:true, subtree:true});
-        });
-        </script>
-    """)
+    ui.add_head_html("""<script>document.addEventListener('DOMContentLoaded', () => { const r = () => window.renderMathInElement && renderMathInElement(document.body, {delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],throwOnError: false}); new MutationObserver(r).observe(document.body, {childList:true, subtree:true}); });</script>""")
     ui.add_head_html('''<style>
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
@@ -396,23 +242,13 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 @keyframes bdot{0%,60%,100%{transform:translateY(0);opacity:.35}30%{transform:translateY(-5px);opacity:1}}
 *{-webkit-tap-highlight-color:transparent!important}
 .no-select,.q-btn,.nav-item,.send-btn{user-select:none!important;outline:none!important;-webkit-user-select:none!important}
-.pulse-green{animation:pgreen 0.8s infinite alternate}
-@keyframes pgreen{from{background:#22c55e;box-shadow:0 0 2px #22c55e}to{background:#4ade80;box-shadow:0 0 10px #4ade80}}
-.pulse-red{animation:pred 0.5s infinite alternate}
-@keyframes pred{from{background:#ef4444}to{background:#fca5a5;box-shadow:0 0 8px #ef4444}}
+.pulse-green{animation:pgreen 0.4s infinite alternate}
+@keyframes pgreen{0%{background:#22c55e;opacity:1}100%{background:#4ade80;opacity:0.3;box-shadow:0 0 8px #22c55e}}
+.pulse-red{animation:pred 0.3s infinite alternate}
+@keyframes pred{0%{background:#ef4444;opacity:1}100%{background:#fca5a5;opacity:0.4;box-shadow:0 0 10px #ef4444}}
 .q-focus-helper,.q-ripple,.q-btn__overlay{display:none!important;visibility:hidden!important;opacity:0!important}
 .q-btn:before{box-shadow:none!important}
 .q-btn:active{background:transparent!important}
-@keyframes led-blink-green {
-    0%, 100% { background: #22c55e; box-shadow: 0 0 0 rgba(34, 197, 100, 0); }
-    50% { background: #4ade80; box-shadow: 0 0 10px rgba(34, 197, 100, 0.6); }
-}
-@keyframes led-blink-red {
-    0%, 100% { background: #ef4444; box-shadow: 0 0 0 rgba(239, 68, 68, 0); }
-    50% { background: #f87171; box-shadow: 0 0 10px rgba(239, 68, 68, 0.6); }
-}
-.led-green { animation: led-blink-green 1s ease-in-out infinite; }
-.led-red { animation: led-blink-red 0.6s ease-in-out infinite; }
 .q-field__control,.q-field__native{background:transparent!important}
 .q-field--outlined .q-field__control:before{border:none!important}
 .q-field--outlined .q-field__control:after{display:none!important}
@@ -441,29 +277,18 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 .send-btn .q-focus-helper{display:none!important}
 @media(max-width:820px){.sidebar-right{display:none}}
 @media(max-width:560px){.sidebar-left{display:none}}
-    </style>''')
+</style>''')
 
-    class S:
-        nav        = 'Chat'
-        subject    = 'Descriptive'
-        processing = False
-        multi      = False
-        status_cls = ''      # For LED signaling
-        model_name = 'Ready' # For model display
-        cur_sid    = None
-    s = S()
-    refs = {}
+    s = S(); refs = {}
 
     with ui.element('div').classes('app-shell'):
-        # LEFT SIDEBAR
         with ui.element('div').classes('sidebar-left'):
-            with ui.element('div').style('display:flex;align-items:center;gap:10px;padding:15px 12px 11px;border-bottom:1px solid #e5e7eb;flex-shrink:0;'):
-                ui.html(f'<div style="width:30px;height:30px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{icon_chart("white")}</div>')
+            with ui.element('div').style('display:flex;align-items:center;gap:10px;padding:15px 12px;border-bottom:1px solid #e5e7eb;'):
+                ui.html(f'<div style="width:30px;height:30px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;">{icon_chart("white")}</div>')
                 with ui.element('div'):
-                    ui.label(APP_TITLE).style('font-weight:700;font-size:13px;color:#111827;line-height:1.2;display:block;')
-                    ui.label(APP_SUBTITLE).style('font-size:9px;color:#9ca3af;letter-spacing:.14em;font-weight:600;display:block;')
-
-            nav_wrap = ui.element('div').style('padding:11px 8px 3px;flex-shrink:0;')
+                    ui.label(APP_TITLE).style('font-weight:700;font-size:13px;color:#111827;')
+                    ui.label(APP_SUBTITLE).style('font-size:9px;color:#9ca3af;font-weight:600;')
+            nav_wrap = ui.element('div').style('padding:11px 8px;')
             @ui.refreshable
             def render_nav():
                 nav_wrap.clear()
@@ -471,16 +296,10 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                     ui.label('NAVIGATION').classes('slabel').style('padding:0 3px 7px;')
                     for item in NAV_ITEMS:
                         active = item == s.nav
-                        def _click(it=item):
-                            s.nav = it; render_nav.refresh()
-                        with ui.element('div').classes(f'nav-item{"  active" if active else ""}').on('click',_click):
-                            ui.element('span').style(f'width:6px;height:6px;border-radius:50%;flex-shrink:0;background:{"#7c3aed" if active else "#d1d5db"};')
-                            ui.label(item).style(f'font-size:12.5px;{"font-weight:600;" if active else ""}')
+                        with ui.element('div').classes(f'nav-item{"  active" if active else ""}').on('click',lambda it=item: (setattr(s,'nav',it), render_nav.refresh())):
+                            ui.label(item)
             render_nav()
-
-            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;flex-shrink:0;')
-
-            # Toggle
+            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;')
             with ui.element('div').style('padding:0px 12px;'):
                 with ui.element('div').classes('w-full relative flex p-1 bg-gray-200/50 rounded-full no-select overflow-hidden').style('user-select:none;height:auto;'):
                     pill = ui.element('div').style('position:absolute;top:2px;bottom:2px;left:2px;width:calc(50% - 2px);background:white;border-radius:999px;box-shadow:0 1px 3px rgba(0,0,0,.1);transition:transform .3s cubic-bezier(.4,0,.2,1);transform:translateX(0);pointer-events:none;')
@@ -496,209 +315,97 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                         lbl1 = ui.label(MODE_LEFT).classes('w-full text-center leading-none no-select text-purple-600 font-bold text-[13px] mt-[1.5px]')
                     with ui.button(on_click=lambda:_tog(True)).classes('relative z-10 flex-1 h-full p-0 flex items-center justify-center').props('flat no-caps no-ripple'):
                         lbl2 = ui.label(MODE_RIGHT).classes('w-full text-center leading-none no-select text-gray-500 font-medium text-[12px] mt-[1px]')
-
-            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;flex-shrink:0;')
-            ui.label('RECENT').classes('slabel').style('padding:0 12px 6px;flex-shrink:0;')
-
-            recents_wrap = ui.element('div').style('flex:1;min-height:0;overflow-y:auto;padding:0 6px;')
+            ui.element('div').style('border-top:1px solid #e5e7eb;margin:7px 10px;')
+            ui.label('RECENT').classes('slabel').style('padding:0 12px 6px;')
+            recents_wrap = ui.element('div').style('flex:1;overflow-y:auto;padding:0 6px;')
             @ui.refreshable
             def render_recents():
                 recents_wrap.clear()
                 with recents_wrap:
-                    if not SID_ORDER:
-                        ui.label('No recent chats').style('font-size:11px;color:#d1d5db;padding:8px 10px;display:block;')
                     for sid in SID_ORDER:
                         sess = SESSIONS.get(sid)
-                        if not sess: continue
-                        def _load(sv=sid): _load_session(sv)
-                        with ui.element('div').classes(f'recent-item{"  cur" if sid==s.cur_sid else ""}').on('click',_load).style('width:100%;'):
-                            ui.label(sess['title']).style('font-size:12px;font-weight:500;color:#374151;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;')
-                            ui.label(sess['date']).style('font-size:10px;color:#9ca3af;display:block;margin-top:1px;')
-            render_recents()
-            refs['render_recents'] = render_recents
+                        with ui.element('div').classes(f'recent-item{"  cur" if sid==s.cur_sid else ""}').on('click',lambda sv=sid: _load_session(sv)):
+                            ui.label(sess['title']).style('font-size:12px;font-weight:500;color:#374151;')
+            render_recents(); refs['render_recents']=render_recents
 
-            with ui.element('div').style('padding:8px 8px 11px;border-top:1px solid #e5e7eb;flex-shrink:0;'):
-                def _new_chat():
-                    _save_session()
-                    s.cur_sid = None; s.processing = False
-                    mc = refs['mc']; mc.clear()
-                    render_bot_block(WELCOME, mc)
-                    render_recents.refresh()
-                ui.button('+ New chat', on_click=_new_chat).style('width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:9px;color:#374151;font-size:12px;font-weight:600;padding:8px 0;cursor:pointer;').props('flat no-caps')
-
-        # CENTER CHAT
         with ui.element('div').classes('chat-center'):
-            with ui.element('div').style('display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb;flex-shrink:0;background:#fff;'):
-                ui.html(f'<div style="width:30px;height:30px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{icon_chart()}</div>')
-                with ui.element('div').style('flex:1;min-width:0;'):
-                    ui.label('StatsAI Analyst').style('font-size:14px;font-weight:700;color:#111827;display:block;line-height:1.2;')
-                    with ui.element('div').style('display:flex;align-items:center;gap:5px;margin-top:2px;'):
-                        ui.element('span').style('width:6px;height:6px;border-radius:50%;background:#22c55e;flex-shrink:0;')
-                        ui.label('Online').style('font-size:11px;color:#6b7280;')
-                ui.label('Verified').style('font-size:10px;font-weight:700;color:#7c3aed;background:#ede9fe;padding:2px 8px;border-radius:999px;flex-shrink:0;')
-
-            scroll = ui.scroll_area().style('flex:1;min-height:0;background:#fff;')
+            with ui.element('div').style('display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb;'):
+                ui.html(f'<div style="width:30px;height:30px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;">{icon_chart()}</div>')
+                ui.label('StatsAI Analyst').style('font-size:14px;font-weight:700;')
+            scroll = ui.scroll_area().style('flex:1;')
             refs['scroll'] = scroll
             with scroll:
                 mc = ui.element('div').style('display:flex;flex-direction:column;gap:18px;padding:18px;width:100%;')
                 refs['mc'] = mc
                 render_bot_block(WELCOME, mc)
-
-            with ui.element('div').style('padding:10px 14px 13px;border-top:1px solid #f3f4f6;flex-shrink:0;background:#fff;'):
+            with ui.element('div').style('padding:10px 14px 13px;border-top:1px solid #f3f4f6;'):
                 with ui.element('div').style('display:flex;align-items:center;gap:10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:999px;padding:4px 5px 4px 16px;'):
-                    inp = ui.input(placeholder='Message StatsAI...').props('borderless dense').style('flex:1;font-size:13px;color:#111827;background:transparent;min-width:0;')
+                    inp = ui.input(placeholder='Message StatsAI...').props('borderless dense').style('flex:1;font-size:13px;')
                     refs['inp'] = inp
-
-                    async def send_message(forced=None):
-                        val = (forced or inp.value).strip()
+                    async def send_message():
+                        val = inp.value.strip()
                         if not val or s.processing: return
-                        inp.value = ''
-                        s.processing = True
-
-                        if s.cur_sid is None:
-                            sid = _new_sid()
-                            s.cur_sid = sid
-                            SESSIONS[sid] = {'title': val[:40]+('…' if len(val)>40 else ''), 'date': _today(), 'messages': []}
-                            SID_ORDER.insert(0, sid)
-                            render_recents.refresh()
-
-                        mc_ref = refs['mc']; sa_ref = refs['scroll']
-                        render_user_bubble(val, mc_ref)
-                        sa_ref.scroll_to(percent=1.0)
-                        typing = render_typing(mc_ref)
-                        sa_ref.scroll_to(percent=1.0)
-
-
-                        chip_params = CHIP_PARAMS.get(val)
-                        if chip_params:
-                            await asyncio.sleep(0.5)
+                        inp.value = ''; s.processing = True
+                        if not s.cur_sid:
+                            sid = _new_sid(); s.cur_sid=sid; SESSIONS[sid] = {'title': val[:30], 'date': _today(), 'messages': []}
+                            SID_ORDER.insert(0, sid); render_recents.refresh()
+                        mc_ref=refs['mc']; sa_ref=refs['scroll']; render_user_bubble(val, mc_ref); sa_ref.scroll_to(percent=1.0)
+                        typing=render_typing(mc_ref); sa_ref.scroll_to(percent=1.0)
+                        
+                        import requests as req
+                        stack = S.models if S.models else ["Mistral Large"]
+                        r = random.randint(0, 8); start = (r // len(stack)) % len(stack)
+                        final_stack = stack[start:] + stack[:start]; success = False
+                        for i, m_name in enumerate(final_stack):
+                            try:
+                                s.model_name = f'Hitting {m_name}...'; refs['status_led'].classes('pulse-green', remove='bg-gray-300 bg-green-500 pulse-red'); refs['model_lbl'].text = s.model_name
+                                payload = {'message': val, 'model_id': m_name, 'domain': s.subject.lower(), 'history': json.dumps([{'role':m['role'],'text':m['text']} for m in SESSIONS[s.cur_sid]['messages']])}
+                                res = await asyncio.get_event_loop().run_in_executor(None, lambda: req.post(API_URL, data=payload, timeout=API_TIMEOUT))
+                                if res.status_code == 200:
+                                    data = res.json(); reply = data.get('reply',''); s.model_name = m_name
+                                    refs['status_led'].classes('bg-green-500', remove='pulse-green pulse-red'); refs['model_lbl'].text = s.model_name
+                                    try: typing.delete()
+                                    except: pass
+                                    render_bot_block(reply, mc_ref); SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':reply}])
+                                    success = True; break
+                                else: raise Exception("API Error")
+                            except:
+                                s.model_name = f'Failover: {final_stack[i+1]}...' if i+1 < len(final_stack) else 'Offline'
+                                refs['status_led'].classes('pulse-red', remove='pulse-green'); refs['model_lbl'].text = s.model_name
+                                if i+1 < len(final_stack): await asyncio.sleep(1.5)
+                        if not success:
                             try: typing.delete()
                             except: pass
-                            expl_map = {
-                                "Normal Plot": "Standard normal distribution N(0,1) — the classic bell curve centred at zero.",
-                                "T-Dist Plot": "Student's t-distribution with 10 degrees of freedom, heavier tails than normal.",
-                                "F-Dist Plot": "F-distribution with df1=5, df2=20 — used in ANOVA and regression tests.",
-                                "Chi-Square":  "Chi-square distribution with 4 degrees of freedom — used in goodness-of-fit tests.",
-                                "Poisson":     "Poisson distribution (λ=4) — models counts of rare events in a fixed interval.",
-                                "Binomial":    "Binomial distribution (n=20, p=0.5) — models number of successes in 20 trials.",
-                                "Exponential": "Exponential distribution (λ=1) — models time between Poisson events.",
-                                "Log-Normal":  "Log-normal distribution — positively skewed, values are exponents of a normal variable.",
-                                "Scatter Plot":"Scatter plot with correlation ρ≈0.7 showing a positive linear relationship.",
-                                "Box Plot":    "Box plots for three groups showing median, IQR, and outliers.",
-                                "Regression Plot":"Simple linear regression with fitted line and r² statistic.",
-                                "Z-Curve":     "Standard normal with critical region shaded for z=1.96 (p=0.025).",
-                                "ANOVA Plot":  "Box plots comparing four groups — the basis of one-way ANOVA.",
-                                "Heatmap Grid":"8×8 correlation heatmap — intensity encodes variable relationship strength.",
-                                "Histogram":   "Histogram of 300 normal samples with overlaid theoretical PDF.",
-                                "Trend Chart": "24-period cumulative trend line showing temporal pattern.",
-                                "Waterfall Plot":"Waterfall chart showing incremental value changes across periods.",
-                                "Violin Plot": "Violin plots combining density estimation with box plot summaries.",
-                                "Pareto Chart":"Pareto chart with cumulative percentage — the 80/20 rule visualised.",
-                                "Pie Breakout":"Donut chart breaking down categorical proportions.",
-                            }
-                            explanation = expl_map.get(val, f"Visualisation for: {val}")
-                            fake_reply  = f"<explanation>{explanation}</explanation><chart_params>{json.dumps(chip_params)}</chart_params>"
-                            render_bot_block(fake_reply, mc_ref)
-                            SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':fake_reply}])
-                        else:
-                            try:
-                                s.status_cls = 'active'
-                                s.model_name = 'Syncing Engines...'
-                                try:
-                                    refs['status_led'].classes('pulse-green', remove='bg-gray-300 bg-green-500 pulse-red')
-                                    refs['model_lbl'].text = s.model_name
-                                except: pass
-                                
-                                import requests as req
-                                payload = {
-                                    'message': val, 'mode': 'multi' if s.multi else 'single', 'domain': s.subject.lower(),
-                                    'history': json.dumps([{'role':m['role'],'text':m['text']} for m in SESSIONS[s.cur_sid]['messages']])
-                                }
-                                res = await asyncio.get_event_loop().run_in_executor(None, lambda: req.post(API_URL, data=payload, timeout=API_TIMEOUT))
-                                
-                                try: typing.delete()
-                                except: pass
-                                
-                                if res.status_code == 200:
-                                    data = res.json()
-                                    reply = data.get('reply','')
-                                    s.status_cls = 'success'
-                                    s.model_name = data.get('model_used', 'Ready')
-                                    try:
-                                        refs['status_led'].classes('bg-green-500', remove='pulse-green pulse-red bg-gray-300')
-                                        refs['model_lbl'].text = s.model_name
-                                    except: pass
-                                    render_bot_block(reply, mc_ref)
-                                    SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':reply}])
-                                else:
-                                    s.status_cls = 'error'
-                                    s.model_name = f'HTTP {res.status_code}'
-                                    try:
-                                        refs['status_led'].classes('pulse-red', remove='pulse-green bg-green-500 bg-gray-300')
-                                        refs['model_lbl'].text = s.model_name
-                                    except: pass
-                                    with mc_ref: ui.label(f'API error {res.status_code}').style('color:#ef4444;font-size:12px;font-style:italic;')
-                            except Exception as exc:
-                                try: typing.delete()
-                                except: pass
-                                s.status_cls = 'error'
-                                s.model_name = 'Conn Error'
-                                try:
-                                    refs['status_led'].classes('pulse-red', remove='pulse-green bg-green-500 bg-gray-300')
-                                    refs['model_lbl'].text = s.model_name
-                                except: pass
-                                with mc_ref: ui.label(f'Connection error: {exc}').style('color:#ef4444;font-size:12px;font-style:italic;')
-                            finally:
-                                try: refs['render_led'].refresh()
-                                except: pass
-
-                        s.processing = False
-                        sa_ref.scroll_to(percent=1.0)
-
-                    inp.on('keydown.enter', lambda: asyncio.create_task(send_message()))
-                    with ui.button(on_click=lambda: asyncio.create_task(send_message())).classes('send-btn').props('flat'):
+                            with mc_ref: ui.label('Critically Offline').style('color:red;font-size:12px;')
+                        s.processing = False; sa_ref.scroll_to(percent=1.0)
+                    inp.on('keydown.enter', send_message)
+                    with ui.button(on_click=send_message).classes('send-btn').props('flat'):
                         ui.html(icon_send())
 
-        # RIGHT SIDEBAR (Narrowed + Model Status)
         with ui.element('div').classes('sidebar-right'):
-            with ui.scroll_area().style('flex:1;min-height:0;'):
-                with ui.element('div').style('padding:20px 10px; width: 100%;'):
-                    ui.label('MODEL STATUS').classes('slabel').style('margin-bottom:15px;')
-                    
-                    # PERMANENT STATUS CARD (STABILIZED & LOCKED)
-                    with ui.element('div').classes('bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col gap-3').style('width: 100%; margin: 0;'):
+            with ui.scroll_area().style('flex:1;'):
+                with ui.element('div').style('padding:20px 10px;'):
+                    ui.label('MODEL STATUS').classes('slabel')
+                    with ui.element('div').classes('bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col gap-3 mt-3'):
                         with ui.element('div').classes('flex items-center gap-3'):
-                            # LED indicator (Manual Ref)
-                            led = ui.element('div').classes('w-2.5 h-2.5 rounded-full bg-gray-300')
-                            refs['status_led'] = led
-                            ui.label('ENGINE STATUS').classes('text-[10px] font-black text-gray-400 uppercase tracking-widest')
-                        
-                        # Model name label (Manual Ref)
-                        m_lbl = ui.label('Ready').classes('text-[12px] font-black text-purple-700 truncate tracking-tight')
-                        refs['model_lbl'] = m_lbl
-            
-            with ui.element('div').style('padding:15px; border-top:1px solid #f3f4f6;'):
-                ui.label('StatsAI v2.5').classes('text-[10px] text-gray-300 font-bold uppercase text-center w-full block')
+                            refs['status_led'] = ui.element('div').classes('w-2.5 h-2.5 rounded-full bg-gray-300')
+                            ui.label('ENGINE STATUS').classes('text-[10px] font-black text-gray-400')
+                        refs['model_lbl'] = ui.label('Ready').classes('text-[12px] font-black text-purple-700')
+            ui.label('StatsAI v2.5').classes('text-[10px] text-gray-300 font-bold text-center w-full block p-4')
 
-    def _save_session():
-        sid = s.cur_sid
-        if not sid or sid not in SESSIONS: return
-        if not SESSIONS[sid].get('messages'):
-            SESSIONS.pop(sid, None)
-            if sid in SID_ORDER: SID_ORDER.remove(sid)
+    def _load_session(sid):
+        sess = SESSIONS.get(sid); s.cur_sid = sid; mc_ref = refs['mc']; mc_ref.clear()
+        for msg in sess['messages']: (render_user_bubble(msg['text'], mc_ref) if msg['role']=='user' else render_bot_block(msg['text'], mc_ref))
+        render_recents.refresh(); refs['scroll'].scroll_to(percent=1.0)
 
-    def _load_session(sid: str):
-        sess = SESSIONS.get(sid)
-        if not sess: return
-        s.cur_sid = sid
-        mc_ref = refs['mc']; mc_ref.clear()
-        for msg in sess['messages']:
-            if msg['role'] == 'user': render_user_bubble(msg['text'], mc_ref)
-            else: render_bot_block(msg['text'], mc_ref)
-        render_recents.refresh()
-        refs['scroll'].scroll_to(percent=1.0)
-
+async def _startup_sync():
+    import requests as req
+    try:
+        await asyncio.sleep(1)
+        res = await asyncio.get_event_loop().run_in_executor(None, lambda: req.get('http://127.0.0.1:3001/api/config', timeout=5))
+        if res.status_code == 200: S.models = res.json().get('models', ["Mistral Large"])
+    except: pass
 
 if __name__ in {'__main__', '__mp_main__'}:
-    logger.info("Starting StatsAI Unified UI Frontend on port 8080...")
+    app.on_startup(_startup_sync)
     ui.run(title='StatsAI Analyst', port=8080, show=False, reload=False)
