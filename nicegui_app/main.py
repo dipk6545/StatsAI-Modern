@@ -550,9 +550,6 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                         if not val or s.processing: return
                         inp.value = ''
                         s.processing = True
-                        s.pipe_vis   = True
-                        s.pipe_step  = -1
-                        refs['render_pipeline'].refresh()
 
                         if s.cur_sid is None:
                             sid = _new_sid()
@@ -567,12 +564,6 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                         typing = render_typing(mc_ref)
                         sa_ref.scroll_to(percent=1.0)
 
-                        async def _anim():
-                            for i in range(len(PIPELINE_STEPS)):
-                                s.pipe_step = i
-                                refs['render_pipeline'].refresh()
-                                await asyncio.sleep(0.45)
-                        asyncio.create_task(_anim())
 
                         chip_params = CHIP_PARAMS.get(val)
                         if chip_params:
@@ -641,9 +632,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                             finally:
                                 pass
 
-                        s.pipe_step  = -1
                         s.processing = False
-                        refs['render_pipeline'].refresh()
                         sa_ref.scroll_to(percent=1.0)
 
                     inp.on('keydown.enter', lambda: asyncio.create_task(send_message()))
