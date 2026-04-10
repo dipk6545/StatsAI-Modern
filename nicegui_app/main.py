@@ -185,18 +185,22 @@ def render_bot_block(raw_text: str, container):
                     if not part.strip(): continue
                     lines = part.strip().split('\n', 1)
                     title = lines[0].strip(); body  = lines[1].strip() if len(lines) > 1 else ""
-                    with ui.element('div').classes('bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden mb-3'):
-                        with ui.element('div').classes('bg-gray-50/50 px-4 py-2 border-b border-gray-50'):
-                            ui.label(title).classes('text-[13px] font-bold text-gray-700')
-                        with ui.element('div').classes('p-4'):
-                            chunks = re.split(r'(\$\$.*?\$\$)', body, flags=re.DOTALL)
-                            for chunk in chunks:
-                                if not chunk.strip(): continue
-                                if chunk.startswith('$$'):
-                                    with ui.element('div').classes('py-4 flex justify-center bg-purple-50/30 rounded-xl my-2'):
-                                        ui.markdown(chunk.strip()).classes('text-lg text-purple-900 math-target')
-                                else:
-                                    ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 math-target')
+                    with ui.element('div').style('display:inline-block;max-width:85%;').classes('bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden mb-3 hover:shadow-md transition-shadow'):
+                        # Header Section
+                        with ui.element('div').classes('bg-gray-50/50 px-4 py-2 flex items-center justify-between'):
+                            ui.label(title).classes(f'text-[13px] font-bold {"text-gray-700" if body else "text-gray-800 font-medium"}')
+                        
+                        # Content Section (Only if body exists)
+                        if body:
+                            with ui.element('div').classes('p-4 border-t border-gray-50'):
+                                chunks = re.split(r'(\$\$.*?\$\$)', body, flags=re.DOTALL)
+                                for chunk in chunks:
+                                    if not chunk.strip(): continue
+                                    if chunk.startswith('$$'):
+                                        with ui.element('div').classes('py-4 flex justify-center bg-purple-50/30 rounded-xl my-2'):
+                                            ui.markdown(chunk.strip()).classes('text-lg text-purple-900 math-target')
+                                    else:
+                                        ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 math-target')
                 ui.run_javascript('if(window.renderMathInElement) renderMathInElement(document.body, {delimiters: [{left: "$$", right: "$$", display: true}, {left: "$", right: "$", display: false}]});')
                 if params:
                     try:
@@ -326,7 +330,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 
         with ui.element('div').classes('chat-center'):
             with ui.element('div').style('display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #e5e7eb;flex-shrink:0;background:#fff;'):
-                ui.html(f'<div style="width:30px;height:30px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-center;flex-shrink:0;">{icon_chart()}</div>')
+                ui.html(f'<div style="width:30px;height:30px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{icon_chart("white")}</div>')
                 ui.label('StatsAI Analyst').style('font-size:14px;font-weight:700;color:#111827;')
             scroll = ui.scroll_area().style('flex:1;background:#fff;')
             refs['scroll'] = scroll

@@ -13,14 +13,19 @@ import uvicorn
 from groq import Groq
 from cerebras.cloud.sdk import Cerebras
 try:
-    from mistralai import Mistral # v2
-    MIST_MODE = "V2"
+    # Optimized for user environment: Speakeasy structure
+    from mistralai.client import Mistral
+    MIST_MODE = "V2_SPEAKEASY"
 except ImportError:
     try:
-        from mistralai.client import MistralClient # v1
-        MIST_MODE = "V1"
+        from mistralai import Mistral # v2 Standard
+        MIST_MODE = "V2"
     except ImportError:
-        MIST_MODE = None
+        try:
+            from mistralai.client import MistralClient # v1
+            MIST_MODE = "V1"
+        except ImportError:
+            MIST_MODE = None
 
 # ── INITIALIZATION ────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,7 +65,7 @@ async def api_config():
     available = []
     # Check specific loaded keys
     if GROQ_KEY:  available.append("Groq Llama 3.3")
-    if MIST_KEY:  available.append("Mistral Large")
+    if MIST_KEY:  available.append("Mistral Medium")
     if CERE_KEY:  available.append("Cerebras Llama")
     logger.info(f"Available Engines: {available}")
     return {"models": available}
@@ -80,8 +85,14 @@ async def api_chat(
     if "Groq" in model_id:
         client = Groq(api_key=GROQ_KEY); actual_model = "llama-3.3-70b-versatile"
     elif "Mistral" in model_id:
-        client = Mistral(api_key=MIST_KEY) if MIST_MODE == "V2" else MistralClient(api_key=MIST_KEY)
-        actual_model = "mistral-large-latest"
+        if MIST_MODE == "V2_SPEAKEASY":
+            from mistralai.client import Mistral
+            client = Mistral(api_key=MIST_KEY)
+        elif MIST_MODE == "V2":
+            client = Mistral(api_key=MIST_KEY)
+        else:
+            client = MistralClient(api_key=MIST_KEY)
+        actual_model = "mistral-medium-latest"
     elif "Cerebras" in model_id:
         client = Cerebras(api_key=CERE_KEY); actual_model = "llama3.1-8b"
     
@@ -95,7 +106,8 @@ async def api_chat(
     msgs = [{"role": "system", "content": sys_prompt}]
     try:
         hist = json.loads(history)
-        for h in hist[-6:]: msgs.append({"role": "assistant" if h.get('role') == 'bot' else "user", "content": h.get('text', '')})
+        # Deep Memory: Last 12 messages for better context
+        for h in hist[-12:]: msgs.append({"role": "assistant" if h.get('role') == 'bot' else "user", "content": h.get('text', '')})
     except: pass
     msgs.append({"role": "user", "content": message})
 
@@ -103,13 +115,13 @@ async def api_chat(
     try:
         logger.info(f"Targeting {model_id}...")
         if "Mistral" in model_id:
-            if MIST_MODE == "V2":
-                resp = await asyncio.to_thread(client.chat.complete, model=actual_model, messages=msgs)
+            if MIST_MODE in ["V2", "V2_SPEAKEASY"]:
+                resp = await asyncio.to_thread(client.chat.complete, model=actual_model, messages=msgs, temperature=0.8)
             else:
                 resp = await asyncio.to_thread(client.chat, model=actual_model, messages=msgs)
             full_reply = resp.choices[0].message.content
         else:
-            resp = await asyncio.to_thread(client.chat.completions.create, model=actual_model, messages=msgs)
+            resp = await asyncio.to_thread(client.chat.completions.create, model=actual_model, messages=msgs, temperature=0.8)
             full_reply = resp.choices[0].message.content
         
         match = re.search(r'<chart_params>.*?</chart_params>', full_reply, flags=re.DOTALL)
