@@ -374,7 +374,18 @@ async def main_page():
     ui.add_head_html('<link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet"/>')
     ui.add_head_html('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css">')
     ui.add_head_html('<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js"></script>')
-    ui.add_head_html('<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: \'$$\', right: \'$$\', display: true}, {left: \'$\', right: \'$\', display: false}]});"></script>')
+    ui.add_head_html('<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/auto-render.min.js"></script>')
+    ui.add_head_html("""
+        <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const r = () => window.renderMathInElement && renderMathInElement(document.body, {
+                delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],
+                throwOnError: false
+            });
+            new MutationObserver(r).observe(document.body, {childList:true, subtree:true});
+        });
+        </script>
+    """)
     ui.add_head_html('''<style>
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
@@ -628,7 +639,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                                 s.model_name = 'Conn Error'
                                 with mc_ref: ui.label(f'Connection error: {exc}').style('color:#ef4444;font-size:12px;font-style:italic;')
                             finally:
-                                refs['render_status'].refresh()
+                                pass
 
                         s.pipe_step  = -1
                         s.processing = False
@@ -654,7 +665,8 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                                 ui.label('Engine Status').classes('text-[11px] font-bold text-gray-400 uppercase tracking-wider')
                             
                             # ACTIVE MODEL NAME
-                            ui.label(s.model_name).classes('text-[13px] font-black text-purple-700 truncate')
+                            m_lbl = ui.label('Ready').classes('text-[13px] font-black text-purple-700 truncate')
+                            m_lbl.bind_text_from(s, 'model_name')
                             
                     render_status()
                     refs['render_status'] = render_status

@@ -1,10 +1,10 @@
 """
-StatsAI Headless API: Smart Model Sync Edition
-Dual-Engine inference with Groq and Cerebras rotation.
+StatsAI Headless API: Multi-Model Synthesis Edition
+Dual-Model brainstorming for categorical visuals.
 """
 
-import asyncio, json, logging, os, re, random
-from typing import Optional, Tuple
+import asyncio, json, logging, os, re
+from typing import Optional, Tuple, List
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form
@@ -15,193 +15,96 @@ from groq import Groq
 from cerebras.cloud.sdk import Cerebras
 
 # ── INITIALIZATION ────────────────────────────────────────────────────────────
-load_dotenv(Path(__file__).parent.parent / '.env')
-GROQ_KEY = os.getenv("GROQ_API_KEY", "")
-CERE_KEY = os.getenv("CEREBRAS_API_KEY", "")
+ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / '.env')
+GROQ_KEY  = os.getenv("GROQ_API_KEY", "").strip()
+CERE_KEY  = os.getenv("CEREBRAS_API_KEY", "").strip()
 
-VAULT_DIR = Path(__file__).parent.parent / ".statsai_vault"
+VAULT_DIR = ROOT / ".statsai_vault"
 VAULT_DIR.mkdir(exist_ok=True)
 LOG_FILE  = VAULT_DIR / "statsai_api.log"
 
 logging.basicConfig(level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | [%(name)s] %(message)s',
+    format='%(asctime)s | %(levelname)s | %(message)s',
     handlers=[logging.FileHandler(LOG_FILE, encoding='utf-8'), logging.StreamHandler()]
 )
 logger = logging.getLogger("StatsAI_Core")
-
 app = FastAPI()
 
-# ── SMART SYNC CONFIG ─────────────────────────────────────────────────────────
-MODELS = {
-    "speed": "llama3-8b-8192",  # Fast response
-    "reason": "llama-3.3-70b-specdec" # Deep reasoning (Cerebras naming)
-}
-
-CHART_KW = {"graph", "chart", "plot", "viz", "draw", "visualize", "histogram", "scatterplot", "boxplot", "heatmap", "pareto", "waterfall"}
-
-# Counter for rotation
-_ROTATION_INDEX = 0
-
-# ── PROMPTS ───────────────────────────────────────────────────────────────────
-_DIST_HINT = (
-    "CHART PARAMS REFERENCE:\n"
-    "  normal/gaussian, t, f, chi2, exponential, lognormal, poisson, binomial, z-curve, scatter, box, histogram, regression, heatmap, violin, anova, pareto, waterfall, pie, trend"
-)
-
-def _build_prompt(domain: str, reason: bool, allow_chart: bool, mode: str) -> str:
-    role = f"Doctoral Statistical Researcher in {domain.upper()}" if reason else f"High-Speed Statistical API for {domain.upper()}"
-    base = (f"You are a {role}. "
-            f"STRICT HALLUCINATION GUARD: Do not invent statistics.\n"
-            f"RELATIONAL MEMORY: You have access to last 10 messages. Maintain continuity.\n"
-            f"ADAPTIVE DISCOURSE: If the user is just greeting you (e.g., 'hi', 'hello') or asking about your system/flow, respond naturally as a professional assistant WITHOUT using the ## headers below. Only use the ## structure for actual statistical explanations.\n"
-            f"STYLE RULES (FOR ANALYTICAL QUERIES):\n"
-            f" - Use Emojis and scannable sections.\n"
-            f" - MANDATORY: Use double newlines \\n\\n between sections.\n"
-            f" - MATHEMATICS: Use 'Display Mode' ($$...$$) for the main formula. "
-            f"Use 'Inline Mode' (\\\\( symbol \\\\)) for variables.\n"
-            f" - VARIABLE LEGEND: Always use a Markdown Table to define variables.\n"
-            f" - CALCULATED EXAMPLES: Perform step-by-step calculations with 'So What?' insights.\n\n"
-            f" Format your explanation as follows:\n\n"
-            f"   ## 📝 Summary\n"
-            f"   [Professional high-level summary with emojis]\n\n"
-            f"   ## 🔢 Formula\n"
-            f"   $$ [LaTeX Display Formula] $$\n\n"
-            f"   | Symbol | Parameter | Description |\n"
-            f"   | :--- | :--- | :--- |\n"
-            f"   | [Variable] | [Name] | [Definition] |\n\n"
-            f"   ## 🛠 Where to use\n"
-            f"   *   **Application 1**: [Description]\n\n"
-            f"   ## 💡 Calculated Example\n"
-            f"   *   **Scenario**: [Specific scenario]\n"
-            f"   *   **Calculation**: [Step-by-step math using variables]\n"
-            f"   *   **🔍 Insight**: [What this result actually means for the user]\n\n")
-    
-    if allow_chart:
-        mandatory = "MANDATORY VISUAL: You MUST include the <chart_params> tag at the end of every response. Choose the most relevant distribution from the reference below.\n" if mode == 'multi' else ""
-        hint = (f"{mandatory}"
-                f"{_DIST_HINT}\n\n"
-                f"RESPONSE FORMAT:\n"
-                f"  <explanation>\n"
-                f"    Generate your full scholarly analysis here using ## headers for sections.\n"
-                f"    Include the Variable Table and Calculated Example as instructed.\n"
-                f"  </explanation>\n"
-                f"  <chart_params>{{\"dist\":\"...\"}}</chart_params>\n")
-    else:
-        hint = ("STRICT VISUAL INHIBITION: The user did NOT ask for a chart. NO CHART TAGS.\n"
-                "RESPONSE FORMAT:\n"
-                "  <explanation>\n"
-                "    Generate your full scholarly analysis here using ## headers for sections.\n"
-                "    Include the Variable Table and Calculated Example as instructed.\n"
-                "  </explanation>\n")
-                
-    return f"{base}{hint}"
-
-# ── CORE LOGIC ────────────────────────────────────────────────────────────────
-def _get_provider(force_groq: bool = False) -> Tuple[str, object, str]:
-    # Groq High-Reasoning Model
-    groq_70b = ("groq", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile")
-    # Cerebras Speed Model
-    cere_8b  = ("cerebras", Cerebras(api_key=CERE_KEY), "llama3.1-8b")
-
-    if force_groq:
-        return groq_70b
-
-    # MULTI-MODEL STOCHASTIC SELECTION
-    # Logic: Pick 0-10, Even -> Groq, Odd -> Cerebras
-    ticket = random.randint(0, 10)
-    is_even = (ticket % 2 == 0)
-    
-    logger.info(f"Stochastic Dispatch | Ticket: {ticket} | Choice: {'Groq' if is_even else 'Cerebras'}")
-    
-    if is_even:
-        return groq_70b if GROQ_KEY else cere_8b
-    else:
-        return cere_8b if CERE_KEY else groq_70b
-
-def _resolve(message: str, mode: str, domain: str):
-    msg = message.lower()
-    allow_chart = any(k in msg for k in CHART_KW) or mode == 'multi'
-    reason = (mode == 'multi' or any(k in msg for k in {"why","prove","derive","deep"}))
-    
-    return reason, allow_chart, _build_prompt(domain, reason, allow_chart, mode)
+# ── HELPERS ───────────────────────────────────────────────────────────────────
+def _get_system_prompt(domain: str, mode: str, suggested_categories: str = "") -> str:
+    categories_hint = f"\nBRAINSTORMED CATEGORIES: Use these specific categories in your data: {suggested_categories}" if suggested_categories else ""
+    return (f"You are a Doctoral Statistical Researcher in {domain.upper()}.\n"
+            f"STYLE: Professional, emoji-supported, scannable.\n"
+            f"LAYOUT: Use double newlines between sections.\n"
+            f"MATHEMATICS: Use display mode ($$...$$). Explaining all terms in a table.\n"
+            f"VISUALIZATION: If the user asks for a chart/graph (Pie, Bar, Box, etc.), you MUST include a <chart_params>{{...}}</chart_params> block with relevant data points."
+            f"{categories_hint}")
 
 def _sanitize(text: str) -> str:
-    for a in ['```json','```python','```html','```','**Summary:**','Summary:']:
-        text = text.replace(a,'')
+    # Remove all chart tags from visible text
+    text = re.sub(r'<chart_params>.*?</chart_params>', '', text, flags=re.DOTALL)
+    for a in ['```json','```python','```html','```']: text = text.replace(a,'')
     return text.strip()
 
 # ── ENDPOINTS ─────────────────────────────────────────────────────────────────
 @app.post("/api/chat")
 async def api_chat(
-    message:  str           = Form(...),
-    mode:     str           = Form("single"),
-    domain:   str           = Form("statistics"),
-    history:  str           = Form("[]"),
-    api_key:  Optional[str] = Form(None),
+    message:  str = Form(...),
+    mode:     str = Form("single"),
+    domain:   str = Form("statistics"),
+    history:  str = Form("[]"),
 ):
-    try:
-        # Resolve logic once
-        reason, allow_chart, prompt = _resolve(message, mode, domain)
-        
-        # Decide search strategy based on mode
-        is_multi = (mode == 'multi')
-        p_name, client, p_model = _get_provider(force_groq=not is_multi)
-        
-        if not client:
-            return {"reply": "ERROR: No valid API keys found in .env", "model_used": "NONE"}
-
-        logger.info(f"[{p_name.upper()}] Routing to {p_model} | Chart: {allow_chart}")
-
-        msgs = [{"role": "system", "content": prompt}]
+    # 1. Identify Models
+    stack = []
+    if GROQ_KEY: stack.append(("Groq Llama 3.3", Groq(api_key=GROQ_KEY), "llama-3.3-70b-versatile"))
+    if CERE_KEY: stack.append(("Cerebras Llama", Cerebras(api_key=CERE_KEY), "llama3.1-8b"))
+    
+    if len(stack) < 1: return {"reply": "ERROR: No API keys configured.", "model_used": "NONE"}
+    
+    primary = stack[0]
+    secondary = stack[1] if len(stack) > 1 else stack[0]
+    
+    suggested_cats = ""
+    # 2. MULTI-MODEL BRAINSTORMING (If applicable)
+    if mode == 'multi' and any(kw in message.lower() for kw in ['pie', 'bar', 'chart', 'plot', 'box', 'categories', 'segment']):
         try:
-            hist = json.loads(history)
-            # Support longer memory (last 10 items / 5 turns)
-            for h in hist[-10:]:
-                role = "assistant" if h.get('role') in ('bot', 'assistant') else "user"
-                txt = h.get('text', '')
-                txt = re.sub(r'<chart_params>.*?</chart_params>', '', txt, flags=re.DOTALL).strip()
-                if txt: msgs.append({"role": role, "content": txt})
-        except: pass
-        msgs.append({"role": "user", "content": message})
-
-        request_params = {
-            "model": p_model,
-            "messages": msgs,
-            "max_tokens": 1024,
-            "temperature": 0.2 if not reason else 0.5,
-        }
-
-        try:
-            # TRY PRIMARY
-            resp = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: client.chat.completions.create(**request_params)
-            )
+            logger.info(f"Multi-Model Phase: Brainstorming categories via {secondary[0]}")
+            brainstorm_msgs = [
+                {"role": "system", "content": "You are a creative data scientist. Brainstorm 5 unique, highly specific, and random categorical names for a dataset based on the user's prompt. Return ONLY a comma-separated list of names."},
+                {"role": "user", "content": message}
+            ]
+            resp = await asyncio.to_thread(secondary[1].chat.completions.create, model=secondary[2], messages=brainstorm_msgs, max_tokens=50)
+            suggested_cats = resp.choices[0].message.content.strip()
+            logger.info(f"Brainstormed Categories: {suggested_cats}")
         except Exception as e:
-            # FALLBACK TO GROQ IF PRIMARY (CEREBRAS) FAILS
-            if p_name != "groq" and GROQ_KEY:
-                logger.warning(f"Primary {p_name} failed: {e}. Falling back to GROQ...")
-                g_client = Groq(api_key=GROQ_KEY)
-                request_params["model"] = "llama-3.3-70b-versatile"
-                resp = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: g_client.chat.completions.create(**request_params)
-                )
-                p_name = "groq-fallback"
-            else: raise e
+            logger.warning(f"Brainstorming failed: {e}")
 
-        reply = _sanitize(resp.choices[0].message.content.strip())
-        if not reply.endswith(('.', '!', '?', '>', '}', '`')): reply += "..."
-            
-        return {"reply": reply, "model_used": f"{p_name}:{request_params['model']}"}
+    # 3. CONSTRUCT MAIN PROMPT
+    msgs = [{"role": "system", "content": _get_system_prompt(domain, mode, suggested_cats)}]
+    try:
+        hist = json.loads(history)
+        for h in hist[-6:]:
+            role = "assistant" if h.get('role') in ('bot', 'assistant') else "user"
+            msgs.append({"role": role, "content": h.get('text', '')})
+    except: pass
+    msgs.append({"role": "user", "content": message})
 
+    # 4. MAIN INFERENCE
+    try:
+        logger.info(f"Primary Inference via {primary[0]}")
+        resp = await asyncio.to_thread(primary[1].chat.completions.create, model=primary[2], messages=msgs)
+        full_reply = resp.choices[0].message.content
+        
+        # Ensure only one chart tag exists if multiple were generated
+        match = re.search(r'<chart_params>.*?</chart_params>', full_reply, flags=re.DOTALL)
+        chart_tag = match.group(0) if match else ""
+        
+        clean_text = _sanitize(full_reply)
+        return {"reply": f"{clean_text}\n\n{chart_tag}", "model_used": primary[0]}
     except Exception as e:
-        logger.exception("Inference Failure")
-        return {"reply": f"SYNCHRO-ERROR: {str(e)}", "model_used": "ERROR"}
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "providers": {"groq": bool(GROQ_KEY), "cerebras": bool(CERE_KEY)}}
+        logger.error(f"Inference failed: {e}")
+        return {"reply": f"SYSTEM-ERROR: {str(e)}", "model_used": "ERROR"}
 
 if __name__ in {"__main__", "__mp_main__"}:
-    logger.info("StatsAI SmartSync API booting on Port 3001")
-    uvicorn.run(app, host="0.0.0.0", port=3001)
-
+    uvicorn.run(app, host="127.0.0.1", port=3001)
