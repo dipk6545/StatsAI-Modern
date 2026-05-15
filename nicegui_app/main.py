@@ -64,7 +64,7 @@ def _line(x, y, name=''):
 
 def build_figure(params: dict) -> go.Figure:
     N = 300
-    dist = str(params.get('dist', 'normal')).lower().replace('-','').replace(' ','')
+    dist = str(params.get('type', params.get('chart_type', params.get('dist', 'normal')))).lower().replace('-','').replace(' ','')
     if dist in ('normal','gaussian','bell','normalplot','normaldist'):
         mu, sig = params.get('mu', np.random.randint(-5, 6)), params.get('sigma', round(np.random.uniform(0.5, 3.0), 1))
         x = np.linspace(mu-4*sig, mu+4*sig, N)
@@ -125,11 +125,19 @@ def build_figure(params: dict) -> go.Figure:
         colors = ['#7c3aed','#a78bfa','#6d28d9','#6366f1','#8b5cf6','#c4b5fd','#ddd6fe']
         fig    = go.Figure(go.Pie(labels=labels, values=values, hole=0.35, marker=dict(colors=colors[:len(labels)], line=dict(color='white',width=2))))
         fig.update_layout(**_base_layout(title=dict(text='Distribution Breakout', font_size=13)))
-    elif dist in ('trend','trendchart','line'):
+    elif dist in ('trend','trendchart','line','graph','area'):
         n   = params.get('n',24)
-        y   = np.cumsum(np.random.randn(n))+10
-        fig = go.Figure(go.Scatter(x=list(range(n)), y=y, mode='lines+markers', fill='tozeroy', fillcolor=BRAND_FILL, line=dict(color=BRAND,width=2.5), marker=dict(color=BRAND,size=5)))
-        fig.update_layout(**_base_layout(title=dict(text='Trend Chart', font_size=13), xaxis_title='Period', yaxis_title='Value'))
+        y   = params.get('y', (np.cumsum(np.random.randn(n))+10).tolist())
+        x   = params.get('x', list(range(len(y))))
+        mode = 'lines' if dist == 'area' else 'lines+markers'
+        fill = 'tozeroy' if dist in ('area','trend','trendchart') else None
+        fig = go.Figure(go.Scatter(x=x, y=y, mode=mode, fill=fill, fillcolor=BRAND_FILL, line=dict(color=BRAND,width=2.5), marker=dict(color=BRAND,size=5)))
+        fig.update_layout(**_base_layout(title=dict(text=params.get('title', 'Trend Chart'), font_size=13), xaxis_title=params.get('xlabel','Period'), yaxis_title=params.get('ylabel','Value')))
+    elif dist in ('bar','barchart'):
+        x = params.get('x', ['A','B','C','D'])
+        y = params.get('y', [10, 20, 15, 25])
+        fig = go.Figure(go.Bar(x=x, y=y, marker_color=BRAND))
+        fig.update_layout(**_base_layout(title=dict(text=params.get('title', 'Bar Chart'), font_size=13), xaxis_title=params.get('xlabel','Category'), yaxis_title=params.get('ylabel','Value')))
     else:
         x = np.linspace(-4,4,N)
         fig = go.Figure(_line(x, sp.norm.pdf(x), 'N(0,1)'))
@@ -141,10 +149,48 @@ class S:
     nav='Chat'; subject='Descriptive'; processing=False; multi=False; status_cls=''; model_name='Ready'; cur_sid=None; models=["Mistral Large"]
 
 SESSIONS: dict = {}; SID_ORDER: list = []
+SESSION_PATH = 'd:/StatsAi/chat_sessions.json'
+
+def _persist_sessions():
+    try:
+        with open(SESSION_PATH, 'w') as f:
+            json.dump({'order': SID_ORDER, 'data': SESSIONS}, f)
+    except: pass
+
+def _hydrate_sessions():
+    global SESSIONS, SID_ORDER
+    try:
+        import os
+        if os.path.exists(SESSION_PATH):
+            with open(SESSION_PATH, 'r') as f:
+                d = json.load(f)
+                SID_ORDER.clear()
+                SID_ORDER.extend(d.get('order', []))
+                SESSIONS.clear()
+                SESSIONS.update(d.get('data', {}))
+    except: pass
+
+_hydrate_sessions()
 
 # ── UI CONSTANTS ───────────────────────────────────────────────────────────────
 MODE_LEFT   = 'Single'; MODE_RIGHT  = 'Multi'; APP_TITLE   = 'StatsAI'; APP_SUBTITLE= 'ANALYST'
 BOT_LABEL   = 'STATSAI ANALYST'; USER_LETTER = 'S'; API_URL     = 'http://127.0.0.1:3001/api/chat'; API_TIMEOUT = 90
+
+@app.post("/api/run_code")
+async def api_run_code(code: str = Form(...)):
+    import subprocess, sys, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
+        f.write(code)
+        f_path = f.name
+    try:
+        res = subprocess.run([sys.executable, f_path], capture_output=True, text=True, timeout=10)
+        output = res.stdout + res.stderr
+    except Exception as e:
+        output = f"Execution Error: {e}"
+    finally:
+        os.unlink(f_path)
+    return {"output": output}
+
 CHIPS = list(CHIP_PARAMS.keys()); NAV_ITEMS = ['Chat','Reports','Datasets','Gallery']
 WELCOME = "Hello! I'm StatsAI — your statistical research assistant. Click a quick action chip or type a question to get started."
 
@@ -158,8 +204,11 @@ def icon_chart(color='#7c3aed'):
 def icon_send():
     return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22 11 13 2 9l20-7z" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
-def icon_delete(color='#9ca3af'):
-    return f'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>'
+def icon_delete():
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>'
+
+def icon_plus():
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>'
 
 _EXPL_RE   = re.compile(r'<explanation>(.*?)</explanation>', re.DOTALL|re.IGNORECASE)
 _PARAMS_RE = re.compile(r'<chart_params>(.*?)</chart_params>', re.DOTALL|re.IGNORECASE)
@@ -188,39 +237,61 @@ def render_bot_block(raw_text: str, container):
                     if not part.strip(): continue
                     lines = part.strip().split('\n', 1)
                     title = lines[0].strip(); body  = lines[1].strip() if len(lines) > 1 else ""
-                    with ui.element('div').style('display:inline-block;max-width:85%;').classes('bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden mb-3 hover:shadow-md transition-shadow'):
+                    with ui.element('div').style('display:inline-block;max-width:92%;').classes('bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden mb-3 hover:shadow-md transition-shadow'):
                         # Header Section
                         with ui.element('div').classes('bg-gray-50/50 px-4 py-2 flex items-center justify-between'):
                             ui.label(title).classes(f'text-[13px] font-bold {"text-gray-700" if body else "text-gray-800 font-medium"}')
                         
                         # Content Section (Only if body exists)
                         if body:
+                            def _math_safe(t):
+                                def repl(m): return m.group(0).replace('_', r'\_').replace('*', r'\*')
+                                t = re.sub(r'\$\$.*?\$\$', repl, t, flags=re.DOTALL)
+                                return re.sub(r'\$.*?\$', repl, t)
+                            
                             with ui.element('div').classes('p-4 border-t border-gray-50'):
-                                chunks = re.split(r'(\$\$.*?\$\$)', body, flags=re.DOTALL)
-                                for chunk in chunks:
-                                    if not chunk.strip(): continue
-                                    if chunk.startswith('$$'):
-                                        with ui.element('div').classes('py-4 flex justify-center bg-purple-50/30 rounded-xl my-2'):
-                                            ui.markdown(chunk.strip()).classes('text-lg text-purple-900 math-target')
-                                    else:
-                                        ui.markdown(chunk.strip()).classes('text-[13px] text-gray-600 math-target')
-                ui.run_javascript('if(window.renderMathInElement) renderMathInElement(document.body, {delimiters: [{left: "$$", right: "$$", display: true}, {left: "$", right: "$", display: false}]});')
+                                ui.markdown(_math_safe(body)).classes('text-[14px] text-gray-700 leading-relaxed math-target')
+                            
+                            # Actions Footer
+                            with ui.element('div').classes('px-4 py-2 border-t border-gray-50 flex gap-4 bg-gray-50/30'):
+                                bubble_id = f'bubble_{int(time.time()*1000)}'
+                                container.id(bubble_id) # Set ID for capture
+                                with ui.button(on_click=lambda b=body: ui.run_javascript(f'window.copyText(`{b}`)')).props('flat dense size=sm').classes('text-gray-400 hover:text-purple-600'):
+                                    ui.html('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>')
+                                with ui.button(on_click=lambda bid=bubble_id: ui.run_javascript(f'window.capture("{bid}")')).props('flat dense size=sm').classes('text-gray-400 hover:text-purple-600'):
+                                    ui.html('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>')
+                ui.run_javascript('''
+                    if(window.renderMathInElement) {
+                        renderMathInElement(document.body, {
+                            delimiters: [
+                                {left: "$$", right: "$$", display: true},
+                                {left: "$", right: "$", display: false},
+                                {left: "\\(", right: "\\)", display: false},
+                                {left: "\\[", right: "\\]", display: true}
+                            ],
+                            throwOnError: false
+                        });
+                    }
+                ''')
                 if params:
                     try:
                         fig = build_figure(params)
-                        with ui.element('div').classes('rounded-2xl overflow-hidden border border-purple-100 shadow-lg mt-2'):
+                        chart_id = f'chart_{int(time.time()*1000)}'
+                        with ui.element('div').id(chart_id).classes('rounded-2xl overflow-hidden border border-purple-100 shadow-lg mt-2 relative group'):
                             with ui.element('div').classes('bg-purple-600 px-4 py-2 flex items-center justify-between'):
                                 ui.label('LIVE ANALYTICAL PROJECTION').classes('text-[10px] text-white font-bold tracking-widest')
+                                with ui.button(on_click=lambda cid=chart_id: ui.run_javascript(f'window.capture("{cid}")')).props('flat dense size=sm').classes('text-white/70 hover:text-white'):
+                                    ui.html('<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>')
                             ui.plotly(fig.to_dict()).classes('w-full').style('height:350px;background:white;')
                     except Exception as e:
                         ui.label(f'DYNAMICS ERROR: {e}').classes('text-red-400 text-[10px] p-4 bg-red-50 rounded-xl')
 
 def render_user_bubble(text: str, container):
     with container:
-        with ui.element('div').style('display:flex;gap:10px;align-items:flex-start;flex-direction:row-reverse;'):
-            ui.html(f'<div style="width:28px;height:28px;border-radius:9px;background:#7c3aed;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:white;font-size:11px;font-weight:700;">{USER_LETTER}</div>')
-            with ui.element('div').style('display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:1;min-width:0;'):
-                ui.label(text).style('background:#7c3aed;color:white;border-radius:18px;border-top-right-radius:4px;padding:10px 16px;font-size:13px;line-height:1.5;display:block;max-width:88%;word-break:break-word;')
+        with ui.element('div').classes('flex w-full mb-6 gap-3 justify-end items-start'):
+            with ui.element('div').classes('flex flex-col items-end flex-1 min-w-0'):
+                ui.label(text).style('background:linear-gradient(135deg, #7c3aed, #6366f1);color:white;padding:12px 18px;border-radius:20px 4px 20px 20px;font-size:14px;line-height:1.5;max-width:85%;word-wrap:break-word;white-space:normal;box-shadow:0 4px 15px rgba(124,58,237,0.15);')
+            ui.html(f'<div style="width:32px;height:32px;border-radius:10px;background:#7c3aed;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:white;font-size:12px;font-weight:700;box-shadow:0 4px 10px rgba(124,58,237,0.2);">{USER_LETTER}</div>')
 
 def render_typing(container):
     with container:
@@ -238,7 +309,58 @@ async def main_page():
     ui.add_head_html('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css">')
     ui.add_head_html('<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js"></script>')
     ui.add_head_html('<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/contrib/auto-render.min.js"></script>')
-    ui.add_head_html("""<script>document.addEventListener('DOMContentLoaded', () => { const r = () => window.renderMathInElement && renderMathInElement(document.body, {delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],throwOnError: false}); new MutationObserver(r).observe(document.body, {childList:true, subtree:true}); });</script>""")
+    ui.add_head_html('<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>')
+    ui.add_head_html("""<script>
+        window.copyText = (text) => { navigator.clipboard.writeText(text); ui.notify('Copied to clipboard'); };
+        window.capture = async (id) => {
+            const el = document.getElementById(id);
+            const canvas = await html2canvas(el, { backgroundColor: '#ffffff', scale: 2 });
+            canvas.toBlob(blob => {
+                const item = new ClipboardItem({ "image/png": blob });
+                navigator.clipboard.write([item]);
+                ui.notify('Screenshot copied to clipboard');
+            });
+        };
+        window.runPython = async (code, elId) => {
+            const resp = await fetch('/api/run_code', { method: 'POST', body: new URLSearchParams({code}) });
+            const data = await resp.json();
+            const outEl = document.getElementById(elId);
+            outEl.style.display = 'block';
+            outEl.innerText = '>>> OUTPUT:\\n' + data.output;
+        };
+
+        const decorateCode = () => {
+            document.querySelectorAll('pre').forEach(pre => {
+                if (pre.dataset.decorated) return;
+                pre.dataset.decorated = "true";
+                pre.style.position = "relative";
+                
+                const btnWrap = document.createElement('div');
+                btnWrap.style = "position:absolute;top:8px;right:8px;display:flex;gap:6px;";
+                
+                const outId = "out_" + Math.random().toString(36).substr(2, 9);
+                const outEl = document.createElement('div');
+                outEl.id = outId;
+                outEl.style = "display:none;margin-top:10px;padding:10px;background:#1e1e1e;color:#4ade80;font-family:monospace;font-size:12px;border-radius:6px;white-space:pre-wrap;border:1px solid #333;";
+                pre.parentNode.insertBefore(outEl, pre.nextSibling);
+
+                const copyBtn = document.createElement('button');
+                copyBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+                copyBtn.onclick = () => window.copyText(pre.innerText);
+                
+                const runBtn = document.createElement('button');
+                runBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
+                runBtn.onclick = () => window.runPython(pre.innerText, outId);
+                
+                [copyBtn, runBtn].forEach(b => {
+                    b.style = "background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;";
+                    btnWrap.appendChild(b);
+                });
+                pre.appendChild(btnWrap);
+            });
+        };
+        new MutationObserver(decorateCode).observe(document.body, {childList:true, subtree:true});
+    </script>""")
     ui.add_head_html('''<style>
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
@@ -271,12 +393,15 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 .recent-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s;width:100%;border:none;background:transparent;text-align:left}
 .recent-item.cur{background:#ede9fe}
 .slabel{font-size:10px;font-weight:700;color:#9ca3af;letter-spacing:.08em;text-transform:uppercase;display:block}
-.send-btn{width:42px!important;height:42px!important;border-radius:12px!important;background:#7c3aed!important;border:none!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;flex-shrink:0!important;min-height:unset!important;padding:0!important;transition:all .15s cubic-bezier(.4,0,.2,1)!important}
+.send-btn{width:34px!important;height:34px!important;border-radius:50%!important;background:#7c3aed!important;border:none!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;flex-shrink:0!important;min-height:unset!important;padding:0!important;transition:all .15s cubic-bezier(.4,0,.2,1)!important}
 .send-btn:hover{background:#6d28d9!important;transform:translateY(-1px)}
 .send-btn:active{transform:scale(.91)!important}
 .send-btn .q-focus-helper{display:none!important}
 @media(max-width:820px){.sidebar-right{display:none}}
 @media(max-width:560px){.sidebar-left{display:none}}
+pre{background:#f9fafb!important;color:#374151!important;border:1px solid #e5e7eb!important;padding:12px!important;border-radius:8px!important;overflow-x:auto!important;font-family:monospace!important;font-size:12px!important;margin:10px 0!important;box-shadow:inset 0 2px 4px 0 rgba(0,0,0,0.02)!important;}
+code{font-family:monospace!important;background:rgba(0,0,0,0.05);padding:2px 4px;border-radius:4px;color:#7c3aed;}
+pre code{background:transparent!important;padding:0!important;color:inherit!important;}
 </style>''')
 
     s = S(); refs = {}
@@ -285,9 +410,18 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
         with ui.element('div').classes('sidebar-left'):
             with ui.element('div').style('display:flex;align-items:center;gap:10px;padding:15px 12px;border-bottom:1px solid #e5e7eb;flex-shrink:0;'):
                 ui.html(f'<div style="width:30px;height:30px;background:#7c3aed;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">{icon_chart("white")}</div>')
-                with ui.element('div'):
+                with ui.element('div').classes('flex-1'):
                     ui.label(APP_TITLE).style('font-weight:700;font-size:13px;color:#111827;line-height:1.2;display:block;')
                     ui.label(APP_SUBTITLE).style('font-size:9px;color:#9ca3af;letter-spacing:.14em;font-weight:600;display:block;')
+                
+                async def _start_new():
+                    s.cur_sid = None
+                    refs['mc'].clear()
+                    render_bot_block(WELCOME, refs['mc'])
+                    render_recents.refresh()
+                
+                with ui.button(on_click=_start_new).props('flat dense').classes('hover:bg-purple-50 p-1.5 rounded-lg transition-colors group'):
+                    ui.html(icon_plus()).classes('text-gray-400 group-hover:text-purple-600')
             nav_wrap = ui.element('div').style('padding:11px 8px;flex-shrink:0;')
             @ui.refreshable
             def render_nav():
@@ -327,9 +461,9 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                 with recents_wrap:
                     for sid in SID_ORDER:
                         sess = SESSIONS.get(sid)
-                        with ui.element('div').classes(f'recent-item group{"  cur" if sid==s.cur_sid else ""}').on('click',lambda sv=sid: _load_session(sv)):
+                        with ui.element('div').classes(f'recent-item{"  cur" if sid==s.cur_sid else ""}').on('click',lambda sv=sid: _load_session(sv)):
                             ui.label(sess['title']).classes('flex-1 truncate').style('font-size:12px;font-weight:500;color:#374151;')
-                            with ui.button(on_click=lambda e, sv=sid: _delete_session(sv)).props('flat dense size=xs').classes('opacity-0 group-hover:opacity-100 transition-opacity'):
+                            with ui.button(on_click=lambda e, sv=sid: _delete_session(sv)).props('flat dense size=xs').classes('text-gray-400 hover:text-red-400 transition-colors'):
                                 ui.html(icon_delete())
             render_recents(); refs['render_recents']=render_recents
 
@@ -353,13 +487,63 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                         inp.value = ''; s.processing = True
                         if not s.cur_sid:
                             sid = _new_sid(); s.cur_sid=sid; SESSIONS[sid] = {'title': val[:40], 'date': _today(), 'messages': []}
-                            SID_ORDER.insert(0, sid); render_recents.refresh()
+                            SID_ORDER.insert(0, sid); render_recents.refresh(); _persist_sessions()
                         mc_ref=refs['mc']; sa_ref=refs['scroll']; render_user_bubble(val, mc_ref); sa_ref.scroll_to(percent=1.0)
                         typing=render_typing(mc_ref); sa_ref.scroll_to(percent=1.0)
                         import requests as req
-                        stack = S.models if S.models else ["Mistral Large"]
-                        r = random.randint(0, 8); start = (r // len(stack)) % len(stack)
-                        final_stack = stack[start:] + stack[:start]; success = False
+                        
+                        if getattr(s, 'multi', False):
+                            payload = {'message': val, 'history': json.dumps([{'role':m['role'],'text':m['text']} for m in SESSIONS[s.cur_sid]['messages']]), 'domain': s.subject.lower()}
+                            s.model_name = 'Gemini Orchestrating...'
+                            try:
+                                refs['status_led'].classes('pulse-green', remove='bg-gray-300 bg-green-500 pulse-red')
+                                refs['model_lbl'].text = s.model_name
+                            except: pass
+                            
+                            try:
+                                res = await asyncio.get_event_loop().run_in_executor(None, lambda: req.post('http://127.0.0.1:3001/api/multi_chat', data=payload, timeout=120))
+                                if res.status_code == 200:
+                                    reply = res.json().get('reply','')
+                                    s.status_cls='success'; s.model_name = 'Multi-Agent Success'
+                                    try:
+                                        refs['status_led'].classes('bg-green-500', remove='pulse-green pulse-red')
+                                        refs['model_lbl'].text = s.model_name
+                                        typing.delete()
+                                    except: pass
+                                    render_bot_block(reply, mc_ref)
+                                    SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':reply}])
+                                    _persist_sessions()
+                                else: raise Exception(f"HTTP {res.status_code}")
+                            except Exception as exc:
+                                try: typing.delete()
+                                except: pass
+                                with mc_ref: ui.label(f'Orchestration Failed: {exc}').style('color:#ef4444;font-size:12px;font-style:italic;')
+                            s.processing = False; sa_ref.scroll_to(percent=1.0)
+                            return
+
+                        v_lower = val.lower()
+                        if any(w in v_lower for w in ['def ', 'python', 'sql', 'select', 'import', 'pandas', 'script', 'code', 'error']):
+                            best = "codestral"
+                        elif any(w in v_lower for w in ['stat', 'distribution', 'mean', 'variance', 'ml', 'machine learning', 'regression']):
+                            best = "qwen3-32b"
+                        elif any(w in v_lower for w in ['pdf', 'document', 'summarize', 'long']):
+                            best = "gemini-2.5-flash-lite"
+                        elif any(w in v_lower for w in ['complex', 'architecture', 'system design', 'debug']):
+                            best = "llama-3.3-70b-versatile"
+                        elif any(w in v_lower for w in ['prove', 'theorem', 'logic', 'advanced']):
+                            best = "qwen-3-235b-a22b-instruct-2507"
+                        else:
+                            best = "llama-3.1-8b-instant"
+                            
+                        stack = S.models if S.models else [best]
+                        if best not in stack: best = stack[0] if stack else "llama-3.1-8b-instant"
+                        
+                        locked = SESSIONS[s.cur_sid].get('locked_model')
+                        if locked and locked in stack:
+                            final_stack = [locked] + [m for m in stack if m != locked]
+                        else:
+                            final_stack = [best] + [m for m in stack if m != best]
+                        success = False
                         for i, m_name in enumerate(final_stack):
                             try:
                                 s.model_name = f'Hitting {m_name}...'
@@ -377,7 +561,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                                         typing.delete()
                                     except: pass
                                     render_bot_block(reply, mc_ref); SESSIONS[s.cur_sid]['messages'].extend([{'role':'user','text':val},{'role':'bot','text':reply}])
-                                    success = True; break
+                                    SESSIONS[s.cur_sid]['locked_model'] = m_name; success = True; _persist_sessions(); break
                                 else: raise Exception(f"HTTP {res.status_code}")
                             except Exception as exc:
                                 next_m = final_stack[i+1] if i+1 < len(final_stack) else None
@@ -405,6 +589,36 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                             refs['status_led'] = ui.element('div').classes('w-2.5 h-2.5 rounded-full bg-gray-300')
                             ui.label('ENGINE STATUS').classes('text-[10px] font-black text-gray-400 tracking-widest')
                         refs['model_lbl'] = ui.label('Ready').classes('text-[12px] font-black text-purple-700 truncate')
+                    
+                    ui.label('USAGE STATISTICS').classes('slabel').style('margin-top:25px;margin-bottom:15px;')
+                    stats_wrap = ui.element('div').classes('flex flex-col gap-3')
+                    
+                    def load_stats():
+                        try:
+                            with open("d:/StatsAi/model_stats.json", 'r') as f: return json.load(f)
+                        except: return {}
+                    
+                    @ui.refreshable
+                    def render_stats():
+                        stats_wrap.clear()
+                        stats = load_stats()
+                        with stats_wrap:
+                            if not stats:
+                                ui.label('No data yet').classes('text-xs text-gray-400 italic')
+                            else:
+                                max_val = max(stats.values()) if stats else 1
+                                for m_name, count in sorted(stats.items(), key=lambda x: x[1], reverse=True):
+                                    with ui.element('div').classes('w-full'):
+                                        with ui.element('div').classes('flex justify-between items-end mb-1'):
+                                            ui.label(m_name).classes('text-[10px] font-bold text-gray-600 truncate flex-1')
+                                            ui.label(str(count)).classes('text-[10px] font-bold text-purple-600')
+                                        pct = (count / max_val) * 100
+                                        with ui.element('div').classes('w-full h-1.5 bg-gray-100 rounded-full overflow-hidden'):
+                                            ui.element('div').classes('h-full bg-purple-500 rounded-full transition-all duration-500').style(f'width:{pct}%')
+                    
+                    render_stats()
+                    ui.timer(3.0, lambda: render_stats.refresh())
+                    
             ui.label('StatsAI v2.5').classes('text-[10px] text-gray-300 font-bold uppercase text-center w-full block p-4')
 
     def _load_session(sid):
@@ -419,7 +633,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
             s.cur_sid = None
             refs['mc'].clear()
             render_bot_block(WELCOME, refs['mc'])
-        render_recents.refresh()
+        render_recents.refresh(); _persist_sessions()
 
 async def _startup_sync():
     import requests as req
