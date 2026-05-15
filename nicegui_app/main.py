@@ -158,6 +158,9 @@ def icon_chart(color='#7c3aed'):
 def icon_send():
     return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22 11 13 2 9l20-7z" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
+def icon_delete(color='#9ca3af'):
+    return f'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>'
+
 _EXPL_RE   = re.compile(r'<explanation>(.*?)</explanation>', re.DOTALL|re.IGNORECASE)
 _PARAMS_RE = re.compile(r'<chart_params>(.*?)</chart_params>', re.DOTALL|re.IGNORECASE)
 
@@ -265,7 +268,7 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
 .nav-item.active{background:#fff;border-color:#e5e7eb;font-weight:600;color:#111827}
 .nav-item:not(.active){color:#6b7280}
 .nav-item:not(.active):hover{background:#f3f4f6}
-.recent-item{display:block;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s;width:100%;border:none;background:transparent;text-align:left}
+.recent-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s;width:100%;border:none;background:transparent;text-align:left}
 .recent-item.cur{background:#ede9fe}
 .slabel{font-size:10px;font-weight:700;color:#9ca3af;letter-spacing:.08em;text-transform:uppercase;display:block}
 .send-btn{width:42px!important;height:42px!important;border-radius:12px!important;background:#7c3aed!important;border:none!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;flex-shrink:0!important;min-height:unset!important;padding:0!important;transition:all .15s cubic-bezier(.4,0,.2,1)!important}
@@ -324,8 +327,10 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
                 with recents_wrap:
                     for sid in SID_ORDER:
                         sess = SESSIONS.get(sid)
-                        with ui.element('div').classes(f'recent-item{"  cur" if sid==s.cur_sid else ""}').on('click',lambda sv=sid: _load_session(sv)):
-                            ui.label(sess['title']).style('font-size:12px;font-weight:500;color:#374151;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;')
+                        with ui.element('div').classes(f'recent-item group{"  cur" if sid==s.cur_sid else ""}').on('click',lambda sv=sid: _load_session(sv)):
+                            ui.label(sess['title']).classes('flex-1 truncate').style('font-size:12px;font-weight:500;color:#374151;')
+                            with ui.button(on_click=lambda e, sv=sid: _delete_session(sv)).props('flat dense size=xs').classes('opacity-0 group-hover:opacity-100 transition-opacity'):
+                                ui.html(icon_delete())
             render_recents(); refs['render_recents']=render_recents
 
         with ui.element('div').classes('chat-center'):
@@ -406,6 +411,15 @@ html,body{margin:0;padding:0;width:100vw;height:100vh;background:#fff;font-famil
         sess = SESSIONS.get(sid); s.cur_sid = sid; mc_ref = refs['mc']; mc_ref.clear()
         for msg in sess['messages']: (render_user_bubble(msg['text'], mc_ref) if msg['role']=='user' else render_bot_block(msg['text'], mc_ref))
         render_recents.refresh(); refs['scroll'].scroll_to(percent=1.0)
+
+    def _delete_session(sid):
+        if sid in SESSIONS: del SESSIONS[sid]
+        if sid in SID_ORDER: SID_ORDER.remove(sid)
+        if s.cur_sid == sid:
+            s.cur_sid = None
+            refs['mc'].clear()
+            render_bot_block(WELCOME, refs['mc'])
+        render_recents.refresh()
 
 async def _startup_sync():
     import requests as req
